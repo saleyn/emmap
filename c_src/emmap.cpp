@@ -1,4 +1,4 @@
-
+// vim:ts=2:sw=2:et
 
 #include "erl_nif_compat.h"
 #include <sys/mman.h>
@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
+#include <atomic>
 
 static ErlNifResourceType* MMAP_RESOURCE;
 
@@ -54,13 +55,14 @@ void emmap_dtor(ErlNifEnv* env, void* arg)
 
 #define RW_UNLOCK if (handle->rwlock != 0) enif_rwlock_rwunlock(handle->rwlock)
 #define RW_LOCK   if (handle->rwlock != 0) enif_rwlock_rwlock(handle->rwlock)
-#define R_UNLOCK if (handle->rwlock != 0) enif_rwlock_runlock(handle->rwlock)
-#define R_LOCK   if (handle->rwlock != 0) enif_rwlock_rlock(handle->rwlock)
+#define R_UNLOCK  if (handle->rwlock != 0) enif_rwlock_runlock(handle->rwlock)
+#define R_LOCK    if (handle->rwlock != 0) enif_rwlock_rlock(handle->rwlock)
 
 static ERL_NIF_TERM ATOM_OK;
 static ERL_NIF_TERM ATOM_TRUE;
 static ERL_NIF_TERM ATOM_FALSE;
 static ERL_NIF_TERM ATOM_ERROR;
+static ERL_NIF_TERM ATOM_ADDRESS;
 static ERL_NIF_TERM ATOM_LOCK;
 static ERL_NIF_TERM ATOM_NOLOCK;
 static ERL_NIF_TERM ATOM_DIRECT;
@@ -68,36 +70,46 @@ static ERL_NIF_TERM ATOM_READ;
 static ERL_NIF_TERM ATOM_WRITE;
 static ERL_NIF_TERM ATOM_NONE;
 static ERL_NIF_TERM ATOM_PRIVATE;
+static ERL_NIF_TERM ATOM_POPULATE;
 static ERL_NIF_TERM ATOM_SHARED;
 static ERL_NIF_TERM ATOM_ANON;
 static ERL_NIF_TERM ATOM_FILE;
 static ERL_NIF_TERM ATOM_FIXED;
 static ERL_NIF_TERM ATOM_NOCACHE;
+static ERL_NIF_TERM ATOM_NORESERVE;
 static ERL_NIF_TERM ATOM_AUTO_UNLINK;
+static ERL_NIF_TERM ATOM_ADD;
+static ERL_NIF_TERM ATOM_SUB;
+static ERL_NIF_TERM ATOM_BAND;
+static ERL_NIF_TERM ATOM_BOR;
+static ERL_NIF_TERM ATOM_BXOR;
+static ERL_NIF_TERM ATOM_XCHG;
 
 static ERL_NIF_TERM ATOM_BOF;
 static ERL_NIF_TERM ATOM_CUR;
 static ERL_NIF_TERM ATOM_EOF;
 
-static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_read(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_read_line(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_close(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_pread(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_pwrite(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_position(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_open     (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_read     (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_read_line(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_close    (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_pread    (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_pwrite   (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_position (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_patomic  (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 
 extern "C" {
 
     static ErlNifFunc nif_funcs[] =
     {
-        {"open_nif",              4, emmap_open},
-        {"close_nif",             1, emmap_close},
-        {"pread_nif",             3, emmap_pread},
-        {"pwrite_nif",            3, emmap_pwrite},
-        {"position_nif",          3, emmap_position},
-        {"read_nif",              2, emmap_read},
-        {"read_line_nif",         1, emmap_read_line},
+        {"open_nif",      4, emmap_open},
+        {"close_nif",     1, emmap_close},
+        {"pread_nif",     3, emmap_pread},
+        {"pwrite_nif",    3, emmap_pwrite},
+        {"patomic_nif",   4, emmap_patomic},
+        {"position_nif",  3, emmap_position},
+        {"read_nif",      2, emmap_read},
+        {"read_line_nif", 1, emmap_read_line},
     };
 
     ERL_NIF_INIT(emmap, nif_funcs, &on_load, NULL, NULL, NULL);
@@ -108,29 +120,39 @@ static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
     ErlNifResourceFlags flags = (ErlNifResourceFlags)(ERL_NIF_RT_CREATE | ERL_NIF_RT_TAKEOVER);
     MMAP_RESOURCE = enif_open_resource_type_compat(env, "mmap_resource", &emmap_dtor, flags, 0);
 
-    ATOM_OK = enif_make_atom(env, "ok");
-    ATOM_TRUE = enif_make_atom(env, "true");
-    ATOM_FALSE = enif_make_atom(env, "false");
-    ATOM_ERROR = enif_make_atom(env, "error");
+    ATOM_OK           = enif_make_atom(env, "ok");
+    ATOM_TRUE         = enif_make_atom(env, "true");
+    ATOM_FALSE        = enif_make_atom(env, "false");
+    ATOM_ERROR        = enif_make_atom(env, "error");
 
-    ATOM_DIRECT = enif_make_atom(env, "direct");
-    ATOM_READ = enif_make_atom(env, "read");
-    ATOM_WRITE = enif_make_atom(env, "write");
-    ATOM_NONE = enif_make_atom(env, "none");
-    ATOM_PRIVATE = enif_make_atom(env, "private");
-    ATOM_SHARED = enif_make_atom(env, "shared");
-    ATOM_ANON = enif_make_atom(env, "anon");
-    ATOM_FILE = enif_make_atom(env, "file");
-    ATOM_FIXED = enif_make_atom(env, "fixed");
-    ATOM_NOCACHE = enif_make_atom(env, "nocache");
-    ATOM_AUTO_UNLINK = enif_make_atom(env, "auto_unlink");
+    ATOM_ADDRESS      = enif_make_atom(env, "address");
+    ATOM_DIRECT       = enif_make_atom(env, "direct");
+    ATOM_READ         = enif_make_atom(env, "read");
+    ATOM_WRITE        = enif_make_atom(env, "write");
+    ATOM_NONE         = enif_make_atom(env, "none");
+    ATOM_PRIVATE      = enif_make_atom(env, "private");
+    ATOM_POPULATE     = enif_make_atom(env, "populate");
+    ATOM_SHARED       = enif_make_atom(env, "shared");
+    ATOM_ANON         = enif_make_atom(env, "anon");
+    ATOM_FILE         = enif_make_atom(env, "file");
+    ATOM_FIXED        = enif_make_atom(env, "fixed");
+    ATOM_NOCACHE      = enif_make_atom(env, "nocache");
+    ATOM_NORESERVE    = enif_make_atom(env, "noreserve");
+    ATOM_AUTO_UNLINK  = enif_make_atom(env, "auto_unlink");
 
-    ATOM_BOF = enif_make_atom(env, "bof");
-    ATOM_CUR = enif_make_atom(env, "cur");
-    ATOM_EOF = enif_make_atom(env, "eof");
+    ATOM_BOF          = enif_make_atom(env, "bof");
+    ATOM_CUR          = enif_make_atom(env, "cur");
+    ATOM_EOF          = enif_make_atom(env, "eof");
 
-    ATOM_LOCK = enif_make_atom(env, "lock");
-    ATOM_NOLOCK = enif_make_atom(env, "nolock");
+    ATOM_LOCK         = enif_make_atom(env, "lock");
+    ATOM_NOLOCK       = enif_make_atom(env, "nolock");
+
+    ATOM_ADD          = enif_make_atom(env, "add");
+    ATOM_SUB          = enif_make_atom(env, "sub");
+    ATOM_BAND         = enif_make_atom(env, "band");
+    ATOM_BOR          = enif_make_atom(env, "bor");
+    ATOM_BXOR         = enif_make_atom(env, "bxor");
+    ATOM_XCHG         = enif_make_atom(env, "xchg");
 
     return 0;
 }
@@ -169,13 +191,18 @@ static ERL_NIF_TERM make_error_tuple(ErlNifEnv* env, int err) {
 
 
 int decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int *prot, int *flags, bool *direct, bool *lock,
-                 bool *auto_unlink)
+                 bool *auto_unlink, unsigned long int* address)
 {
   bool l = true;
   bool d = false;
   int f = MAP_FILE;
   int p = 0;
+  int arity;
+  const ERL_NIF_TERM* tuple;
+
   *auto_unlink = false;
+  *address     = 0x0;
+
   ERL_NIF_TERM head;
   while (enif_get_list_cell(env, list, &head, &list)) {
 
@@ -194,26 +221,36 @@ int decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int *prot, int *flags, bool 
 
     } else if (enif_is_identical(head, ATOM_PRIVATE)) {
       f |= MAP_PRIVATE;
+    } else if (enif_is_identical(head, ATOM_POPULATE)) {
+      f |= MAP_POPULATE;
     } else if (enif_is_identical(head, ATOM_SHARED)) {
       f |= MAP_SHARED;
-//  } else if (enif_is_identical(head, ATOM_ANON)) {
-//    f |= MAP_ANON;
+    } else if (enif_is_identical(head, ATOM_ANON)) {
+      f |= MAP_ANON;
 //  } else if (enif_is_identical(head, ATOM_FILE)) {
 //    f |= MAP_FILE;
-//  } else if (enif_is_identical(head, ATOM_FIXED)) {
-//    f |= MAP_FIXED;
+    } else if (enif_is_identical(head, ATOM_FIXED)) {
+      f |= MAP_FIXED;
     } else if (enif_is_identical(head, ATOM_NOCACHE)) {
       f |= MAP_NOCACHE;
-    } else if(enif_is_identical(head, ATOM_AUTO_UNLINK)) {
+    } else if (enif_is_identical(head, ATOM_NORESERVE)) {
+      f |= MAP_NORESERVE;
+    } else if (enif_is_identical(head, ATOM_AUTO_UNLINK)) {
       *auto_unlink = true;
+    } else if (enif_get_tuple(env, head, &arity, &tuple) && arity == 2) {
+      if (enif_is_identical  (tuple[0], ATOM_ADDRESS) &&
+          enif_get_ulong(env, tuple[1], address))
+        continue;
+      else
+        return 0;
     } else {
       return 0;
     }
   }
 
   // direct cannot be write
-  if (d & ((p & PROT_WRITE) != 0))
-    return 0;
+  //if (d & ((p & PROT_WRITE) != 0))
+  //  return 0;
 
   // default to private
   if ((f & (MAP_SHARED|MAP_PRIVATE)) == 0)
@@ -222,6 +259,10 @@ int decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int *prot, int *flags, bool 
   // default to read-only
   if ((p & (PROT_READ|PROT_WRITE)) == 0)
     p |= PROT_READ;
+
+  // If address is given, set the "MAP_FIXED" option
+  if (*address && (f & MAP_FIXED) != MAP_FIXED)
+    f |= MAP_FIXED;
 
   *flags = f;
   *prot = p;
@@ -238,6 +279,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
   bool direct, lock, auto_unlink;
   unsigned long int len;
   unsigned long int offset;
+  unsigned long int address;
 
 #ifndef NDEBUG
   if ( sizeof(long int) != sizeof(size_t) ) {
@@ -251,7 +293,8 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
       && enif_get_string(env, argv[0], handle->path, 1024, ERL_NIF_LATIN1)
       && enif_get_ulong(env, argv[1], &offset)
       && enif_get_ulong(env, argv[2], &len)
-      && decode_flags(env, argv[3], &prot, &flags, &direct, &lock, &auto_unlink)) {
+      && decode_flags(env, argv[3], &prot, &flags, &direct, &lock, &auto_unlink,
+                      &address)) {
 
     int mode = (((prot & PROT_WRITE)==PROT_WRITE) ? O_RDWR : O_RDONLY);
 
@@ -260,7 +303,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
       return make_error_tuple(env, errno);
     }
 
-    void * res = mmap(0, (size_t) len, prot, flags, fd, (size_t) offset);
+    void* res = mmap((void*)address, (size_t)len, prot, flags, fd, (size_t)offset);
     if (res == MAP_FAILED) {
       return make_error_tuple(env, errno);
     }
@@ -406,6 +449,57 @@ static ERL_NIF_TERM emmap_pwrite(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
     {
       return enif_make_badarg(env);
     }
+}
+
+/// Atomically add a 64-bit value to the memoty at given position
+/// Args:   Handle, Position::integer(), Op, Increment::integer()
+///           where Op :: add|sub|and|or|xor|xchg
+/// Return: OldValue::integer()
+static ERL_NIF_TERM emmap_patomic(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  mhandle*      handle;
+  unsigned long pos;
+  long          value;
+
+  if (!(argc==4
+        && enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
+        && enif_get_ulong   (env, argv[1], &pos)
+        && enif_is_atom     (env, argv[2])
+        && enif_get_long    (env, argv[3], &value)
+        && pos >= 0 && (pos + 8) <= handle->len
+     ))
+    return enif_make_badarg(env);
+
+  if ((handle->prot & PROT_WRITE) == 0)
+    return make_error_tuple(env, EACCES);
+
+  if (handle->closed)
+    return enif_make_badarg(env);
+
+  void*         mem = (char*)handle->mem + pos;
+  long          res;
+  ERL_NIF_TERM  op  = argv[2];
+
+  if (op == ATOM_ADD)
+    res = ((std::atomic<int64_t>*)mem)->fetch_add(value, std::memory_order_relaxed);
+  else if (op == ATOM_SUB)
+    res = ((std::atomic<int64_t>*)mem)->fetch_sub(value, std::memory_order_relaxed);
+  else if (op == ATOM_BAND)
+    // Atomically replaces the cur value with the result of bitwise (value & arg)
+    res = ((std::atomic<int64_t>*)mem)->fetch_and(value, std::memory_order_relaxed);
+  else if (op == ATOM_BOR)
+    // Atomically replaces the cur value with the result of bitwise (value | arg)
+    res = ((std::atomic<int64_t>*)mem)->fetch_or(value, std::memory_order_relaxed);
+  else if (op == ATOM_BXOR)
+    // Atomically replaces the cur value with the result of bitwise (value ^ arg)
+    res = ((std::atomic<int64_t>*)mem)->fetch_xor(value, std::memory_order_relaxed);
+  else if (op == ATOM_XCHG)
+    // Atomically replaces the cur value with the arg
+    res = ((std::atomic<int64_t>*)mem)->exchange(value, std::memory_order_acq_rel);
+  else
+    return enif_make_badarg(env);
+
+  return enif_make_tuple2(env, ATOM_OK, enif_make_long(env, res));
 }
 
 static ERL_NIF_TERM emmap_read(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])

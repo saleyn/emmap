@@ -1,4 +1,8 @@
+deps
 .eunit
+.rebar
 *~
 *.so
+*.o
+*.d
 *.beam

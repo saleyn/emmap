@@ -1,6 +1,9 @@
 -module(emmap).
 
--export([open/2, open/4, close/1, pread/3, pwrite/3, read/2, read_line/1, position/2]).
+-export([
+    open/2, open/4, close/1, pread/3, pwrite/3, read/2, read_line/1, position/2,
+    patomic/4
+]).
 -on_load(init/0).
 
 -ifdef(TEST).
@@ -10,11 +13,13 @@
 -include_lib("kernel/include/file.hrl").
 
 -type open_option() ::
-    read | write
+    read    | write
   | direct
-  | lock | nolock
+  | lock    | nolock
   | private | shared
+  | populate| anon | fixed | nocache | noreserve
   | nocache | auto_unlink
+  | {address, pos_integer()}
   .
 
 -type mmap_file() :: #file_descriptor{}.
@@ -24,7 +29,8 @@ init() ->
         {error, bad_name} ->
             case code:which(?MODULE) of
                 Filename when is_list(Filename) ->
-                    SoName = filename:join([filename:dirname(Filename),"../priv", "emmap_nifs"]);
+                    Dir    = filename:dirname(filename:dirname(Filename)),
+                    SoName = filename:join([Dir, "priv", "emmap_nifs"]);
                 _ ->
                     SoName = filename:join("../priv", "emmap_nifs")
             end;
@@ -121,21 +127,34 @@ position(#file_descriptor{ module=?MODULE, data=Mem}, {From, Off})
 position_nif(_,_From,_Off) ->
     {ok, 0}.
 
+%% @doc Perform an atomic operation on a 64-bit integer value at given `Position'
+%% using specified argument `Value'.  The function returns an old value at that
+%% location.  This function is thread-safe and can be used for implementing
+%% persistent counters.
+-spec patomic(File::mmap_file(), Position::pos_integer(),
+        Op :: add | sub | 'band' | 'bor' | 'bxor' | xchg, Value::integer()) ->
+    OldValue::integer().
+patomic(#file_descriptor{ module=?MODULE, data=Mem }, Off, Op, Value)
+  when is_integer(Off), is_atom(Op), is_integer(Value) ->
+    patomic_nif(Mem, Off, Op, Value).
+
+patomic_nif(_,_,_,_) ->
+    {error, not_loaded}.
 
 -ifdef(TEST).
 
 simple_test() ->
     {ok, File} = file:open("test.data", [raw, write]),
-    ok = file:write(File, <<"abcd">>),
+    ok = file:write(File, <<"abcd0123">>),
     ok = file:close(File),
 
     %% with direct+shared, the contents of a binary may change
-    {ok, MFile} = emmap:open("test.data", 0, 4, [direct, shared, nolock]),
+    {ok, MFile} = emmap:open("test.data", 0, 8, [direct, shared, nolock]),
     {ok, Mem} = file:pread(MFile, 2, 2),
     <<"cd">> = Mem,
     {error, eacces} = file:pwrite(MFile, 2, <<"xx">>),
 
-    {ok, MFile2} = emmap:open("test.data", 0, 4, [read, write, shared]),
+    {ok, MFile2} = emmap:open("test.data", 0, 8, [read, write, shared]),
     ok = file:pwrite(MFile2, 2, <<"xx">>),
     {ok, <<"xx">>} = file:pread(MFile, 2, 2),
 
@@ -146,8 +165,28 @@ simple_test() ->
     {ok, <<"ab">>} = file:read(MFile, 2),
     {ok, <<"xx">>} = file:read(MFile, 2),
 
+    ok = file:pwrite(MFile2, 0, <<0:64>>),
+    {ok, <<0:64>>} = file:pread(MFile, 0, 8),
+
+    {ok,  0} = emmap:patomic(MFile2, 0,  add, 10),
+    {ok, 10} = emmap:patomic(MFile2, 0,  add, 10),
+    {ok, 20} = emmap:patomic(MFile2, 0,  sub,  5),
+    {ok, 15} = emmap:patomic(MFile2, 0,  sub, 12),
+    {ok,  3} = emmap:patomic(MFile2, 0,'band', 7),
+    {ok,  3} = emmap:patomic(MFile2, 0, 'bor', 7),
+    {ok,  7} = emmap:patomic(MFile2, 0,'bxor', 9),
+    {ok, 14} = emmap:patomic(MFile2, 0, xchg, 10),
+    {ok, 10} = emmap:patomic(MFile2, 0, xchg,  0),
+
     file:close(MFile),
-    file:close(MFile2) .
+    file:close(MFile2),
+    
+    {ok, MFile3} = emmap:open("test.data", 0, 8,
+        [direct, read, write, shared, nolock, {address, 16#512800000000}]),
+    {ok, <<0:64>>} = file:pread(MFile3, 0, 8),
+    file:close(MFile3),
+
+    file:delete("test.data").
 
 
 -endif.
