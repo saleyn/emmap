@@ -21,7 +21,7 @@ The open options is a list containing zero or more of these:
 - `direct`: read/pread operations do not copy memory, but rather use "resource binaries" that can change content if the underlying data is changed.  This is the most performant, but also has other thread-safety implications.
 - `lock`, `nolock` do (or do not) use a semaphore to control state changes internally in the NIF library.  
 - `auto_unlink` automatically deletes the mapped file after the mapped data was garbage collected. This can be used when the mapped file is a file-based shared-memory area (e.g. `/run/shm/...`) and is mapped in `direct` mode to free the memory after the data was gc'd.
-- `{address, integer()}`, `fixed`: Open mapping at the given memory address.
+- `{address, integer()}`, `fixed`: Open mapping at the given memory address (sets MAP_FIXED on the memory mapped file).
 
 From this point, `Mem` can be used with the `file` operations
 
@@ -30,6 +30,17 @@ From this point, `Mem` can be used with the `file` operations
 - `{ok, Binary} = file:read(Mem, Length)` read 1..Length bytes from current position, or return `eof` if pointer is at end of file.
 - `{ok, Pos} = file:position(Mem, Where)` see file:position/2 documentation.
 - `ok = file:close(Mem)`
+
+## Atomic operations on the memory mapped file
+
+The `emmap` application offers a way to do atomic ADD, SUB, XCHG as well as bitwise AND, OR, XOR operations using `emmap:patomic/4` function.
+
+Effectively this directly changes the content of the underlying memory and is thread-safe.
+
+```erlang
+{ok, OldValue} = emmap:patomic(Mem, Position, add, 1).
+```
+This approach allows to implement persistent atomic counters that survive node restarts.
 
 ## Notes
 

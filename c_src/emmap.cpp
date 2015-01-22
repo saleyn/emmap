@@ -229,8 +229,6 @@ int decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int *prot, int *flags, bool 
       f |= MAP_ANON;
 //  } else if (enif_is_identical(head, ATOM_FILE)) {
 //    f |= MAP_FILE;
-    } else if (enif_is_identical(head, ATOM_FIXED)) {
-      f |= MAP_FIXED;
     } else if (enif_is_identical(head, ATOM_NOCACHE)) {
       f |= MAP_NOCACHE;
     } else if (enif_is_identical(head, ATOM_NORESERVE)) {
@@ -239,9 +237,11 @@ int decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int *prot, int *flags, bool 
       *auto_unlink = true;
     } else if (enif_get_tuple(env, head, &arity, &tuple) && arity == 2) {
       if (enif_is_identical  (tuple[0], ATOM_ADDRESS) &&
-          enif_get_ulong(env, tuple[1], address))
+          enif_get_ulong(env, tuple[1], address)) {
+        // If address is given, set the "MAP_FIXED" option
+        if (*address) f |= MAP_FIXED;
         continue;
-      else
+      } else
         return 0;
     } else {
       return 0;
@@ -260,14 +260,10 @@ int decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int *prot, int *flags, bool 
   if ((p & (PROT_READ|PROT_WRITE)) == 0)
     p |= PROT_READ;
 
-  // If address is given, set the "MAP_FIXED" option
-  if (*address && (f & MAP_FIXED) != MAP_FIXED)
-    f |= MAP_FIXED;
-
-  *flags = f;
-  *prot = p;
+  *flags  = f;
+  *prot   = p;
   *direct = d;
-  *lock = l;
+  *lock   = l;
 
   return 1;
 }
