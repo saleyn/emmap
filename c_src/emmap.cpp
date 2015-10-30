@@ -221,8 +221,10 @@ int decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int *prot, int *flags, bool 
 
     } else if (enif_is_identical(head, ATOM_PRIVATE)) {
       f |= MAP_PRIVATE;
+#if ERL_NIF_MINOR_VERSION > 4
     } else if (enif_is_identical(head, ATOM_POPULATE)) {
       f |= MAP_POPULATE;
+#endif
     } else if (enif_is_identical(head, ATOM_SHARED)) {
       f |= MAP_SHARED;
     } else if (enif_is_identical(head, ATOM_ANON)) {
