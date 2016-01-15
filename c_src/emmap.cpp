@@ -112,8 +112,12 @@ extern "C" {
         {"read_line_nif", 1, emmap_read_line},
     };
 
-    ERL_NIF_INIT(emmap, nif_funcs, &on_load, NULL, NULL, NULL);
+    ERL_NIF_INIT(emmap, nif_funcs, &on_load, &on_reload, &on_upgrade, &on_unload);
 };
+
+static int on_reload (ErlNifEnv*, void** priv_data, ERL_NIF_TERM) { return 0; }
+static int on_upgrade(ErlNifEnv*, void*, void**,    ERL_NIF_TERM) { return 0; }
+static int on_unload (ErlNifEnv*, void*)                          { return 0; }
 
 static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
 {

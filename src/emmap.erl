@@ -23,6 +23,7 @@
   .
 
 -type mmap_file() :: #file_descriptor{}.
+-type resource()  :: binary().
 
 init() ->
     case code:priv_dir(emmap) of
