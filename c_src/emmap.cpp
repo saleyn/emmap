@@ -100,65 +100,63 @@ static ERL_NIF_TERM emmap_patomic  (ErlNifEnv*, int argc, const ERL_NIF_TERM arg
 
 extern "C" {
 
-    static ErlNifFunc nif_funcs[] =
-    {
-        {"open_nif",      4, emmap_open},
-        {"close_nif",     1, emmap_close},
-        {"pread_nif",     3, emmap_pread},
-        {"pwrite_nif",    3, emmap_pwrite},
-        {"patomic_nif",   4, emmap_patomic},
-        {"position_nif",  3, emmap_position},
-        {"read_nif",      2, emmap_read},
-        {"read_line_nif", 1, emmap_read_line},
-    };
+  static ErlNifFunc nif_funcs[] =
+  {
+    {"open_nif",      4, emmap_open},
+    {"close_nif",     1, emmap_close},
+    {"pread_nif",     3, emmap_pread},
+    {"pwrite_nif",    3, emmap_pwrite},
+    {"patomic_nif",   4, emmap_patomic},
+    {"position_nif",  3, emmap_position},
+    {"read_nif",      2, emmap_read},
+    {"read_line_nif", 1, emmap_read_line},
+  };
 
-    ERL_NIF_INIT(emmap, nif_funcs, &on_load, &on_reload, &on_upgrade, &on_unload);
 };
 
-static int on_reload (ErlNifEnv*, void** priv_data, ERL_NIF_TERM) { return 0; }
-static int on_upgrade(ErlNifEnv*, void*, void**,    ERL_NIF_TERM) { return 0; }
-static int on_unload (ErlNifEnv*, void*)                          { return 0; }
+ERL_NIF_INIT(emmap, nif_funcs, &on_load, nullptr, nullptr, nullptr);
+
 
 static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
 {
-    ErlNifResourceFlags flags = (ErlNifResourceFlags)(ERL_NIF_RT_CREATE | ERL_NIF_RT_TAKEOVER);
-    MMAP_RESOURCE = enif_open_resource_type_compat(env, "mmap_resource", &emmap_dtor, flags, 0);
+  ErlNifResourceFlags flags = (ErlNifResourceFlags)(ERL_NIF_RT_CREATE | ERL_NIF_RT_TAKEOVER);
+  MMAP_RESOURCE = enif_open_resource_type_compat(env, "mmap_resource", &emmap_dtor, flags, 0);
 
-    ATOM_OK           = enif_make_atom(env, "ok");
-    ATOM_TRUE         = enif_make_atom(env, "true");
-    ATOM_FALSE        = enif_make_atom(env, "false");
-    ATOM_ERROR        = enif_make_atom(env, "error");
+  ATOM_OK           = enif_make_atom(env, "ok");
+  ATOM_TRUE         = enif_make_atom(env, "true");
+  ATOM_FALSE        = enif_make_atom(env, "false");
+  ATOM_ERROR        = enif_make_atom(env, "error");
 
-    ATOM_ADDRESS      = enif_make_atom(env, "address");
-    ATOM_DIRECT       = enif_make_atom(env, "direct");
-    ATOM_READ         = enif_make_atom(env, "read");
-    ATOM_WRITE        = enif_make_atom(env, "write");
-    ATOM_NONE         = enif_make_atom(env, "none");
-    ATOM_PRIVATE      = enif_make_atom(env, "private");
-    ATOM_POPULATE     = enif_make_atom(env, "populate");
-    ATOM_SHARED       = enif_make_atom(env, "shared");
-    ATOM_ANON         = enif_make_atom(env, "anon");
-    ATOM_FILE         = enif_make_atom(env, "file");
-    ATOM_FIXED        = enif_make_atom(env, "fixed");
-    ATOM_NOCACHE      = enif_make_atom(env, "nocache");
-    ATOM_NORESERVE    = enif_make_atom(env, "noreserve");
-    ATOM_AUTO_UNLINK  = enif_make_atom(env, "auto_unlink");
+  ATOM_ADDRESS      = enif_make_atom(env, "address");
+  ATOM_DIRECT       = enif_make_atom(env, "direct");
+  ATOM_READ         = enif_make_atom(env, "read");
+  ATOM_WRITE        = enif_make_atom(env, "write");
+  ATOM_NONE         = enif_make_atom(env, "none");
+  ATOM_PRIVATE      = enif_make_atom(env, "private");
+  ATOM_POPULATE     = enif_make_atom(env, "populate");
+  ATOM_SHARED       = enif_make_atom(env, "shared");
+  ATOM_ANON         = enif_make_atom(env, "anon");
+  ATOM_FILE         = enif_make_atom(env, "file");
+  ATOM_FIXED        = enif_make_atom(env, "fixed");
+  ATOM_NOCACHE      = enif_make_atom(env, "nocache");
+  ATOM_NORESERVE    = enif_make_atom(env, "noreserve");
+  ATOM_AUTO_UNLINK  = enif_make_atom(env, "auto_unlink");
 
-    ATOM_BOF          = enif_make_atom(env, "bof");
-    ATOM_CUR          = enif_make_atom(env, "cur");
-    ATOM_EOF          = enif_make_atom(env, "eof");
+  ATOM_BOF          = enif_make_atom(env, "bof");
+  ATOM_CUR          = enif_make_atom(env, "cur");
+  ATOM_EOF          = enif_make_atom(env, "eof");
 
-    ATOM_LOCK         = enif_make_atom(env, "lock");
-    ATOM_NOLOCK       = enif_make_atom(env, "nolock");
+  ATOM_LOCK         = enif_make_atom(env, "lock");
+  ATOM_NOLOCK       = enif_make_atom(env, "nolock");
 
-    ATOM_ADD          = enif_make_atom(env, "add");
-    ATOM_SUB          = enif_make_atom(env, "sub");
-    ATOM_BAND         = enif_make_atom(env, "band");
-    ATOM_BOR          = enif_make_atom(env, "bor");
-    ATOM_BXOR         = enif_make_atom(env, "bxor");
-    ATOM_XCHG         = enif_make_atom(env, "xchg");
+  ATOM_ADD          = enif_make_atom(env, "add");
+  ATOM_SUB          = enif_make_atom(env, "sub");
+  ATOM_BAND         = enif_make_atom(env, "band");
+  ATOM_BOR          = enif_make_atom(env, "bor");
+  ATOM_BXOR         = enif_make_atom(env, "bxor");
+  ATOM_XCHG         = enif_make_atom(env, "xchg");
 
-    return 0;
+  return 0;
 }
 
 static ERL_NIF_TERM describe_error(ErlNifEnv* env, int err) {
@@ -468,7 +466,7 @@ static ERL_NIF_TERM emmap_patomic(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
         && enif_get_ulong   (env, argv[1], &pos)
         && enif_is_atom     (env, argv[2])
         && enif_get_long    (env, argv[3], &value)
-        && pos >= 0 && (pos + 8) <= handle->len
+        && (pos + 8) <= handle->len
      ))
     return enif_make_badarg(env);
 
