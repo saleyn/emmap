@@ -98,26 +98,20 @@ static ERL_NIF_TERM emmap_pwrite   (ErlNifEnv*, int argc, const ERL_NIF_TERM arg
 static ERL_NIF_TERM emmap_position (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM emmap_patomic  (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 
-extern "C" {
 
-    static ErlNifFunc nif_funcs[] =
-    {
-        {"open_nif",      4, emmap_open},
-        {"close_nif",     1, emmap_close},
-        {"pread_nif",     3, emmap_pread},
-        {"pwrite_nif",    3, emmap_pwrite},
-        {"patomic_nif",   4, emmap_patomic},
-        {"position_nif",  3, emmap_position},
-        {"read_nif",      2, emmap_read},
-        {"read_line_nif", 1, emmap_read_line},
-    };
-
-    ERL_NIF_INIT(emmap, nif_funcs, &on_load, &on_reload, &on_upgrade, &on_unload);
+static ErlNifFunc nif_funcs[] =
+{
+  {"open_nif",      4, emmap_open},
+  {"close_nif",     1, emmap_close},
+  {"pread_nif",     3, emmap_pread},
+  {"pwrite_nif",    3, emmap_pwrite},
+  {"patomic_nif",   4, emmap_patomic},
+  {"position_nif",  3, emmap_position},
+  {"read_nif",      2, emmap_read},
+  {"read_line_nif", 1, emmap_read_line},
 };
 
-static int on_reload (ErlNifEnv*, void** priv_data, ERL_NIF_TERM) { return 0; }
-static int on_upgrade(ErlNifEnv*, void*, void**,    ERL_NIF_TERM) { return 0; }
-static int on_unload (ErlNifEnv*, void*)                          { return 0; }
+
 
 static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
 {
@@ -226,8 +220,10 @@ int decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int *prot, int *flags, bool 
     } else if (enif_is_identical(head, ATOM_PRIVATE)) {
       f |= MAP_PRIVATE;
 #if ERL_NIF_MINOR_VERSION > 4
+#ifdef __linux__
     } else if (enif_is_identical(head, ATOM_POPULATE)) {
       f |= MAP_POPULATE;
+#endif
 #endif
     } else if (enif_is_identical(head, ATOM_SHARED)) {
       f |= MAP_SHARED;
@@ -371,8 +367,6 @@ static ERL_NIF_TERM emmap_pread(ErlNifEnv* env, int argc, const ERL_NIF_TERM arg
       && enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
       && enif_get_ulong(env, argv[1], &pos)
       && enif_get_ulong(env, argv[2], &bytes)
-      && pos >= 0
-      && bytes >= 0
       && pos <= handle->len
       )
     {
@@ -427,7 +421,6 @@ static ERL_NIF_TERM emmap_pwrite(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
       && enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
       && enif_get_ulong(env, argv[1], &pos)
       && enif_inspect_binary(env, argv[2], &bin)
-      && pos >= 0
       && (pos + bin.size) <= handle->len
       )
     {
@@ -468,7 +461,7 @@ static ERL_NIF_TERM emmap_patomic(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
         && enif_get_ulong   (env, argv[1], &pos)
         && enif_is_atom     (env, argv[2])
         && enif_get_long    (env, argv[3], &value)
-        && pos >= 0 && (pos + 8) <= handle->len
+        && (pos + 8) <= handle->len
      ))
     return enif_make_badarg(env);
 
@@ -669,3 +662,7 @@ static ERL_NIF_TERM emmap_position(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
       return enif_make_badarg(env);
     }
 }
+
+extern "C" {
+    ERL_NIF_INIT(emmap, nif_funcs, &on_load, NULL, NULL, NULL);
+};
