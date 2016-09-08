@@ -12,8 +12,13 @@ static ErlNifResourceType* MMAP_RESOURCE;
 
 #ifndef MAP_NOCACHE
 /* No MAP_NOCACHE on Linux - just bypass this option */
-#define MAP_NOCACHE (0)
+# define MAP_NOCACHE (0)
 #endif
+
+ // MAP_ANON is deprecated on Linux, and MAP_ANONYMOUS is not present on Mac
+ #ifndef MAP_ANONYMOUS
+ # define MAP_ANONYMOUS MAP_ANON
+ #endif
 
 typedef struct
 {
@@ -224,19 +229,23 @@ int decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int *prot, int *flags, bool 
     } else if (enif_is_identical(head, ATOM_PRIVATE)) {
       f |= MAP_PRIVATE;
 #if ERL_NIF_MINOR_VERSION > 4
+  #ifdef MAP_POPULATE
     } else if (enif_is_identical(head, ATOM_POPULATE)) {
       f |= MAP_POPULATE;
+  #endif
 #endif
     } else if (enif_is_identical(head, ATOM_SHARED)) {
       f |= MAP_SHARED;
     } else if (enif_is_identical(head, ATOM_ANON)) {
-      f |= MAP_ANON;
+      f |= MAP_ANONYMOUS;
 //  } else if (enif_is_identical(head, ATOM_FILE)) {
 //    f |= MAP_FILE;
     } else if (enif_is_identical(head, ATOM_NOCACHE)) {
       f |= MAP_NOCACHE;
+#ifdef MAP_NORESERVE
     } else if (enif_is_identical(head, ATOM_NORESERVE)) {
       f |= MAP_NORESERVE;
+#endif
     } else if (enif_is_identical(head, ATOM_AUTO_UNLINK)) {
       *auto_unlink = true;
     } else if (enif_get_tuple(env, head, &arity, &tuple) && arity == 2) {
@@ -369,8 +378,6 @@ static ERL_NIF_TERM emmap_pread(ErlNifEnv* env, int argc, const ERL_NIF_TERM arg
       && enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
       && enif_get_ulong(env, argv[1], &pos)
       && enif_get_ulong(env, argv[2], &bytes)
-      && pos >= 0
-      && bytes >= 0
       && pos <= handle->len
       )
     {
@@ -425,7 +432,6 @@ static ERL_NIF_TERM emmap_pwrite(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
       && enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
       && enif_get_ulong(env, argv[1], &pos)
       && enif_inspect_binary(env, argv[2], &bin)
-      && pos >= 0
       && (pos + bin.size) <= handle->len
       )
     {
