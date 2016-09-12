@@ -6,3 +6,4 @@ deps
 *.o
 *.d
 *.beam
+_build
