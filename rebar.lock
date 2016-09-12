@@ -1,0 +1,4 @@
+[{<<"edown">>,
+  {git,"https://github.com/uwiger/edown.git",
+       {ref,"754be25f71a04099c83f3ffdff268e70beeb0021"}},
+  0}].
