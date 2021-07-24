@@ -4,6 +4,9 @@
     open/2, open/4, close/1, pread/3, pwrite/3, read/2, read_line/1, position/2,
     patomic/4
 ]).
+
+-export_type([resource/0]).
+
 -on_load(init/0).
 
 -ifdef(TEST).
