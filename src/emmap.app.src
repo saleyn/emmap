@@ -1,6 +1,6 @@
 {application, emmap,
  [
-  {description, ""},
+  {description, "Erlang Memory-Mapped Files"},
   {vsn, "1.0.0"},
   {modules, [
              emmap
