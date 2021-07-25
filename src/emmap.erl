@@ -1,22 +1,26 @@
 -module(emmap).
 
 -export([
+    init/0,
     open/2, open/4, close/1, pread/3, pwrite/3, read/2, read_line/1, position/2,
     patomic/4
 ]).
+-export([open_counters/1, open_counters/2, close_counters/1, inc_counter/2]).
 
 -export_type([resource/0]).
 
 -on_load(init/0).
 
 -ifdef(TEST).
--export([simple_test/0]).
+-include_lib("eunit/include/eunit.hrl").
 -endif.
 
 -include_lib("kernel/include/file.hrl").
 
 -type open_option() ::
-    read    | write
+    read    | write | create | truncate
+  | {chmod,   pos_integer()}
+  | {size,    pos_integer()}
   | direct
   | lock    | nolock
   | private | shared
@@ -48,8 +52,8 @@ open(FileName, Options) ->
     case file:read_file_info(FileName) of
         {ok, FileInfo} ->
             open(FileName, 0, FileInfo#file_info.size, Options);
-        Error ->
-            Error
+        _Error ->
+            open(FileName, 0, 0, Options)
     end.
 
 -spec open(File::string(),
@@ -145,7 +149,55 @@ patomic(#file_descriptor{ module=?MODULE, data=Mem }, Off, Op, Value)
 patomic_nif(_,_,_,_) ->
     {error, not_loaded}.
 
--ifdef(TEST).
+%% @doc Open a persistent memory-mapped file with space for one 64-bit integer counter
+open_counters(Filename) ->
+    open_counters(Filename, 1).
+
+%% @doc Open a persistent memory-mapped file with space for several 64-bit integer counters
+open_counters(Filename, NumCounters) ->
+    Existing = filelib:is_regular(Filename),
+    Size     = 8 + 8 + NumCounters * 8,
+    FileSize = filelib:file_size(Filename),
+    MMAP     = 
+        case open(Filename, 0, Size, [create, read, write, shared, direct, nolock]) of
+            {ok, F} when not Existing, NumCounters > 0 ->
+                ok = pwrite(F, 0, <<"EMMAP001", NumCounters:64/little-integer>>),
+                {F, NumCounters};
+            {ok, F} ->
+                case pread(F, 0, 16) of
+                    {ok, <<"EMMAP", _,_,_, N:64/little-integer>>} when N == NumCounters; NumCounters == 0 ->
+                        {F, N};
+                    {ok, _Other} when FileSize == Size ->
+                        io:format("Initializing mmap: ~p\n", [_Other]),
+                        ok = pwrite(F, 0, <<"EMMAP001", NumCounters:64/little-integer>>),
+                        lists:foldl(fun(I, _) ->
+                            ok = pwrite(F, 16+I*8, <<0:64/little-integer>>),
+                            []
+                        end, [], lists:seq(0, NumCounters-1)),
+                        {F, NumCounters};
+                    {error, Why} ->
+                        throw({cannot_read_data, Filename, Why})
+                end;
+            {error, Reason} ->
+                throw({cannot_open_file, Filename, Reason})
+        end,
+    MMAP.
+
+% Close persistent memory-mapped file previously open with `open_counters/2'
+close_counters({MFile, _NumCnts}) ->
+    close(MFile).
+
+% Increment a counter number `CounterNumber' in the mmap file by one and return old value.
+inc_counter({MFile, NumCnts}, CounterNumber) ->
+    inc_counter({MFile, NumCnts}, CounterNumber, 1).
+
+% Increment a counter number `CounterNumber' in the mmap file by `Count' and return old value.
+inc_counter({MFile, NumCnts}, CounterNumber, Count)
+        when NumCnts > CounterNumber, is_integer(CounterNumber), is_integer(Count) ->
+    patomic(MFile, 16+CounterNumber*8, add, Count).
+    
+  
+-ifdef(EUNIT).
 
 simple_test() ->
     {ok, File} = file:open("test.data", [raw, write]),
@@ -192,5 +244,14 @@ simple_test() ->
 
     file:delete("test.data").
 
+counter_test() ->
+    F  = open_counters("/dev/shm/temp.bin", 1),
+    N1 = inc_counter(F, 1),
+    N2 = inc_counter(F, 1),
+    close_counters(F),
+    file:delete("/dev/shm/temp.bin"),
+    ?assertEqual(0, N1),
+    ?assertEqual(1, N2).
+    
 
 -endif.

@@ -3,6 +3,7 @@
 #include "erl_nif_compat.h"
 #include <sys/mman.h>
 #include <sys/errno.h>
+#include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
@@ -26,6 +27,7 @@ typedef struct
   int direct;
   int prot;
   bool closed;
+  bool debug;
   ErlNifRWLock* rwlock;
   void* mem;
   size_t len;
@@ -66,6 +68,7 @@ void emmap_dtor(ErlNifEnv* env, void* arg)
 static ERL_NIF_TERM ATOM_OK;
 static ERL_NIF_TERM ATOM_TRUE;
 static ERL_NIF_TERM ATOM_FALSE;
+static ERL_NIF_TERM ATOM_DEBUG;
 static ERL_NIF_TERM ATOM_ERROR;
 static ERL_NIF_TERM ATOM_ADDRESS;
 static ERL_NIF_TERM ATOM_LOCK;
@@ -73,6 +76,9 @@ static ERL_NIF_TERM ATOM_NOLOCK;
 static ERL_NIF_TERM ATOM_DIRECT;
 static ERL_NIF_TERM ATOM_READ;
 static ERL_NIF_TERM ATOM_WRITE;
+static ERL_NIF_TERM ATOM_CREATE;
+static ERL_NIF_TERM ATOM_TRUNCATE;
+static ERL_NIF_TERM ATOM_CHMOD;
 static ERL_NIF_TERM ATOM_NONE;
 static ERL_NIF_TERM ATOM_PRIVATE;
 static ERL_NIF_TERM ATOM_POPULATE;
@@ -131,11 +137,15 @@ static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
   ATOM_TRUE         = enif_make_atom(env, "true");
   ATOM_FALSE        = enif_make_atom(env, "false");
   ATOM_ERROR        = enif_make_atom(env, "error");
+  ATOM_DEBUG        = enif_make_atom(env, "debug");
 
   ATOM_ADDRESS      = enif_make_atom(env, "address");
   ATOM_DIRECT       = enif_make_atom(env, "direct");
   ATOM_READ         = enif_make_atom(env, "read");
   ATOM_WRITE        = enif_make_atom(env, "write");
+  ATOM_CREATE       = enif_make_atom(env, "create");
+  ATOM_TRUNCATE     = enif_make_atom(env, "truncate");
+  ATOM_CHMOD        = enif_make_atom(env, "chmod");
   ATOM_NONE         = enif_make_atom(env, "none");
   ATOM_PRIVATE      = enif_make_atom(env, "private");
   ATOM_POPULATE     = enif_make_atom(env, "populate");
@@ -166,26 +176,26 @@ static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
 
 static ERL_NIF_TERM describe_error(ErlNifEnv* env, int err) {
   switch (err) {
-  case EAGAIN:
-    return enif_make_atom(env, "eagain");
-  case EINVAL:
-    return enif_make_atom(env, "einval");
-  case ENOSPC:
-    return enif_make_atom(env, "enospc");
-  case ENOENT:
-    return enif_make_atom(env, "enoent");
-  case ENOMEM:
-    return enif_make_atom(env, "enomem");
-  case EACCES:
-    return enif_make_atom(env, "eacces");
-  case EBADF:
-    return enif_make_atom(env, "ebadf");
-  case ENODEV:
-    return enif_make_atom(env, "enodev");
-  case ENXIO:
-    return enif_make_atom(env, "enxio");
-  case EOVERFLOW:
-    return enif_make_atom(env, "eoverflow");
+    case EAGAIN:
+      return enif_make_atom(env, "eagain");
+    case EINVAL:
+      return enif_make_atom(env, "einval");
+    case ENOSPC:
+      return enif_make_atom(env, "enospc");
+    case ENOENT:
+      return enif_make_atom(env, "enoent");
+    case ENOMEM:
+      return enif_make_atom(env, "enomem");
+    case EACCES:
+      return enif_make_atom(env, "eacces");
+    case EBADF:
+      return enif_make_atom(env, "ebadf");
+    case ENODEV:
+      return enif_make_atom(env, "enodev");
+    case ENXIO:
+      return enif_make_atom(env, "enxio");
+    case EOVERFLOW:
+      return enif_make_atom(env, "eoverflow");
   }
   return enif_make_tuple2(env,
                           enif_make_atom(env, "errno"),
@@ -196,9 +206,20 @@ static ERL_NIF_TERM make_error_tuple(ErlNifEnv* env, int err) {
   return enif_make_tuple2(env, ATOM_ERROR, describe_error(env, err));
 }
 
+static ERL_NIF_TERM make_error_tuple(ErlNifEnv* env, const char* err) {
+  return enif_make_tuple2(env, ATOM_ERROR, enif_make_string(env, err, ERL_NIF_LATIN1));
+}
 
-int decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int *prot, int *flags, bool *direct, bool *lock,
-                 bool *auto_unlink, unsigned long int* address)
+template <typename... Args>
+static void debug(mhandle* h, const char* fmt, Args&&... args)
+{
+  if (h->debug)
+    fprintf(stderr, fmt, std::forward<Args>(args)...);
+}
+
+static int decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flags, 
+                        long* open_flags,  long* mode, bool* direct, bool* lock,
+                        bool* auto_unlink, size_t* address, bool* debug)
 {
   bool l = true;
   bool d = false;
@@ -209,12 +230,21 @@ int decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int *prot, int *flags, bool 
 
   *auto_unlink = false;
   *address     = 0x0;
+  *open_flags  = O_RDONLY;
+  *mode        = 0600;
+  *debug       = false;
 
   ERL_NIF_TERM head;
   while (enif_get_list_cell(env, list, &head, &list)) {
 
     if (enif_is_identical(head, ATOM_READ)) {
       p |= PROT_READ;
+    } else if (enif_is_identical(head, ATOM_DEBUG)) {
+      *debug = true;
+    } else if (enif_is_identical(head, ATOM_CREATE)) {
+      *open_flags |= O_CREAT;
+    } else if (enif_is_identical(head, ATOM_TRUNCATE)) {
+      *open_flags |= O_TRUNC;
     } else if (enif_is_identical(head, ATOM_DIRECT)) {
       d = true;
     } else if (enif_is_identical(head, ATOM_LOCK)) {
@@ -223,6 +253,7 @@ int decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int *prot, int *flags, bool 
       l = false;
     } else if (enif_is_identical(head, ATOM_WRITE)) {
       p |= PROT_WRITE;
+      *open_flags |= O_RDWR;
 //    } else if (enif_is_identical(head, ATOM_NONE)) {
 //    p |= PROT_NONE;
 
@@ -253,6 +284,9 @@ int decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int *prot, int *flags, bool 
           enif_get_ulong(env, tuple[1], address)) {
         // If address is given, set the "MAP_FIXED" option
         if (*address) f |= MAP_FIXED;
+        continue;
+      } else if (enif_is_identical  (tuple[0], ATOM_CHMOD) &&
+          enif_get_long(env, tuple[1], mode)) {
         continue;
       } else
         return 0;
@@ -285,15 +319,16 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
 {
   int flags;
   int prot;
+  long open_flags;
+  long mode;
   bool direct, lock, auto_unlink;
   unsigned long int len;
   unsigned long int offset;
-  unsigned long int address;
+  size_t address;
 
 #ifndef NDEBUG
-  if ( sizeof(long int) != sizeof(size_t) ) {
+  if (sizeof(long int) != sizeof(size_t))
     abort();
-  }
 #endif
   mhandle* handle = (mhandle*)enif_alloc_resource_compat(env, MMAP_RESOURCE,
                                                            sizeof(mhandle));
@@ -302,23 +337,72 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
       && enif_get_string(env, argv[0], handle->path, 1024, ERL_NIF_LATIN1)
       && enif_get_ulong(env, argv[1], &offset)
       && enif_get_ulong(env, argv[2], &len)
-      && decode_flags(env, argv[3], &prot, &flags, &direct, &lock, &auto_unlink,
-                      &address)) {
+      && decode_flags(env, argv[3], &prot, &flags, &open_flags, &mode, &direct,
+                      &lock, &auto_unlink, &address, &handle->debug)) {
 
-    int mode = (((prot & PROT_WRITE)==PROT_WRITE) ? O_RDWR : O_RDONLY);
+    bool exists = access(handle->path, F_OK) == 0;
 
-    int fd = open(handle->path, mode);
+    if (!exists) {
+      if (len == 0)
+        return make_error_tuple(env, "Missing {size, N} option");
+      if ((open_flags & O_CREAT) == 0)
+        return make_error_tuple(env, "Missing 'create' option");
+    }
+
+    int fd = open(handle->path, open_flags, (mode_t)mode);
     if (fd < 0) {
+      debug(handle, "open: %s\r\n", strerror(errno));
       return make_error_tuple(env, errno);
     }
 
+    off_t fsize = 0;
+    {
+      struct stat st;
+      if (fstat(fd, &st) < 0) {
+        debug(handle, "fstat: %s\r\n", strerror(errno));
+        int err = errno;
+        close(fd);
+        return make_error_tuple(env, err);
+      } else {
+        fsize = st.st_size;
+      }
+
+      if (exists && len > 0 && fsize != long(len) && fsize > 0) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "File has different size (%ld) than requested (%ld)", fsize, len);
+        close(fd);
+        return make_error_tuple(env, buf);
+      }
+    }
+
+    // Stretch the file size to the requested size
+    if ((!exists && ((open_flags & (O_CREAT|O_TRUNC)) > 0)) ||
+         (exists && fsize == 0)) {
+      bool is_ok = ftruncate(fd, 0)   == 0 &&
+                   ftruncate(fd, len) == 0;
+      if (!is_ok) {
+        debug(handle, "ftruncate: %s\r\n", strerror(errno));
+        int err = errno;
+        close(fd);
+        return make_error_tuple(env, err);
+      }
+    }
+
+    if (offset > 0) {
+			offset &= ~(sysconf(_SC_PAGE_SIZE) - 1); // offset for mmap() must be page aligned
+
+      if (offset >= len) {
+				close(fd);
+				char buf[128]; snprintf(buf, sizeof(buf), "Offset %d is past end of file", offset);
+        return make_error_tuple(env, buf);
+			}
+    }
     void* res = mmap((void*)address, (size_t)len, prot, flags, fd, (size_t)offset);
     if (res == MAP_FAILED) {
       return make_error_tuple(env, errno);
     }
 
     close(fd);
-
 
     if (lock)
       handle->rwlock = enif_rwlock_create((char*)"mmap");

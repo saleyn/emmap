@@ -10,3 +10,6 @@ clean:
 
 deps:
 	@$(REBAR) get-deps
+
+test eunit:
+	@$(REBAR) eunit
