@@ -13,3 +13,6 @@ deps:
 
 test eunit:
 	@$(REBAR) eunit
+
+docs:
+	@$(REBAR) edoc

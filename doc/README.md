@@ -1,20 +1,9 @@
 
 
-#mmap - memory mapping files for erlang#
+# The emmap application #
 
 
-Copyright (c) 2012 Trifork
-
-
-__Authors:__ Kresten Krab Thorup ([`krab@trifork.com`](mailto:krab@trifork.com)).
-
-
-Status:
-------
-
-
-
-##Modules##
+## Modules ##
 
 
 <table width="100%" border="0" summary="list of modules">
