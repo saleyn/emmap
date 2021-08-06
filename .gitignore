@@ -7,3 +7,4 @@ deps
 *.o
 *.d
 *.beam
+*.crashdump

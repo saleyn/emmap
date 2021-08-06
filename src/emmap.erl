@@ -47,8 +47,13 @@ init() ->
     end,
     erlang:load_nif(SoName, 0).
 
-
-open(FileName, Options) ->
+%% @doc Open/create a memory-mapped file.
+%% If creating a new file, `[create, read, write, {size, N}]' options are required.
+%% For opening an existing file for writing `[read, write]' options are required.
+-spec open(string()|binary(), [open_option()]) -> {ok, mmap_file()} | {error, term()}.
+open(FileName, Options) when is_binary(FileName) ->
+    open(binary_to_list(FileName), Options);
+open(FileName, Options) when is_list(FileName) ->
     case file:read_file_info(FileName) of
         {ok, FileInfo} ->
             open(FileName, 0, FileInfo#file_info.size, Options);
@@ -56,13 +61,19 @@ open(FileName, Options) ->
             open(FileName, 0, 0, Options)
     end.
 
--spec open(File::string(),
+%% @doc Open/create a memory-mapped file.
+%% If creating a new file, `[create, read, write]' options and the `Len' parameter
+%% are required.
+%% For opening an existing file for writing `[read, write]' options are required, and `Len'
+%% can be `0'.
+-spec open(File::string()|binary(),
           Offset::pos_integer(),
           Length::pos_integer(),
           Options::[ open_option() ]) ->
                  {ok, mmap_file()} | {error, term()}.
-
-open(FileName, Off, Len, Options) ->
+open(FileName, Off, Len, Options) when is_binary(FileName) ->
+    open(binary_to_list(FileName), Off, Len, Options);
+open(FileName, Off, Len, Options) when is_list(FileName), is_integer(Off), is_integer(Len) ->
     case open_nif(FileName, Off, Len, Options) of
         {ok, Mem} ->
             {ok, #file_descriptor{ module=?MODULE, data=Mem }};
@@ -81,6 +92,7 @@ close(#file_descriptor{ module=?MODULE, data=Mem }) ->
 close_nif(_) ->
     ok.
 
+%% @doc Read `Len' bytes from a memory-mapped file at a given offset `Off'.
 -spec pread(File::mmap_file(), Offset::pos_integer(), Length::pos_integer()) ->
                    {ok, binary()} | {error, term()} | eof.
 
@@ -90,6 +102,8 @@ pread(#file_descriptor{ module=?MODULE, data=Mem }, Off, Len) ->
 pread_nif(_,_,_) ->
     {ok, <<>>}.
 
+%% @doc Read next `Len' bytes from a memory-mapped file.
+%% Internally the new position within the file is incremented by `Len'.
 -spec read(File::mmap_file(), Length::pos_integer()) ->
                    {ok, binary()} | {error, term()} | eof.
 
@@ -110,15 +124,16 @@ read_line_nif(_) ->
     {ok, <<>>}.
 
 
+%% @doc Write `Data' bytes to a memory-mapped file at a given offset `Off'.
 -spec pwrite(File::mmap_file(), Position::pos_integer(), Data::binary()) ->
                     ok | {error, term()}.
-
 pwrite(#file_descriptor{ module=?MODULE, data=Mem }, Off, Data) ->
     pwrite_nif(Mem, Off, Data).
 
 pwrite_nif(_,_,_) ->
     ok.
 
+%% @doc Write `Data' bytes to a memory-mapped file at a given offset `At'.
 -spec position(File::mmap_file(),
                Position::pos_integer() | {bof|cur|eof, Position::integer()} ) ->
                     {ok, pos_integer()} | {error, term()}.
@@ -183,15 +198,15 @@ open_counters(Filename, NumCounters) ->
         end,
     MMAP.
 
-% Close persistent memory-mapped file previously open with `open_counters/2'
+%% @doc Close persistent memory-mapped file previously open with `open_counters/2'
 close_counters({MFile, _NumCnts}) ->
     close(MFile).
 
-% Increment a counter number `CounterNumber' in the mmap file by one and return old value.
+%% @doc Increment a counter number `CounterNumber' in the mmap file by one and return old value.
 inc_counter({MFile, NumCnts}, CounterNumber) ->
     inc_counter({MFile, NumCnts}, CounterNumber, 1).
 
-% Increment a counter number `CounterNumber' in the mmap file by `Count' and return old value.
+%% @doc Increment a counter number `CounterNumber' in the mmap file by `Count' and return old value.
 inc_counter({MFile, NumCnts}, CounterNumber, Count)
         when NumCnts > CounterNumber, is_integer(CounterNumber), is_integer(Count) ->
     patomic(MFile, 16+CounterNumber*8, add, Count).
