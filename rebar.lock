@@ -1,4 +1,1 @@
-[{<<"edown">>,
-  {git,"https://github.com/uwiger/edown.git",
-       {ref,"d9be492ed535a8740ac8be73ab1ca2407970653e"}},
-  0}].
+[].
