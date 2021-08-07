@@ -12,12 +12,12 @@ This Erlang library provides a wrapper that allows you to memory map files into 
 ## Basic Usage
 
 The basic usage is
-
-    {ok, Mem} = emmap:open("filename", [read, shared, direct]),
-    {ok, Binary} = file:pread(Mem, 100, 40),
-    ...
-    ok = file:close(Mem).
-
+```erlang
+{ok, Mem} = emmap:open("filename", [read, shared, direct]),
+{ok, Binary} = file:pread(Mem, 100, 40),
+...
+ok = file:close(Mem).
+```
 The open options is a list containing zero or more [options](https://saleyn.github.io/emmap/emmap.html#type-open_option).
 
 From this point, `Mem` can be used with the `file` operations:
