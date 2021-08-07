@@ -16,7 +16,7 @@ The basic usage is
     ...
     ok = file:close(Mem).
 
-The open options is a list containing zero or more [options]().
+The open options is a list containing zero or more [options](https://github.com/saleyn/emmap/blob/master/doc/emmap.md#open_option).
 
 From this point, `Mem` can be used with the `file` operations:
 
