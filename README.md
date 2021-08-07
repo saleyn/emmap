@@ -43,10 +43,15 @@ This approach allows to implement persistent atomic counters that survive node r
 
 ## Atomic persistent counters
 
-The `emmap` application allows a user to maintain persistent counters.  Here is an example:
+The `emmap` application allows a user to maintain atomic persistent counters.  This could be
+useful for continuous numbering of some events in the system which could be efficiently shared
+among processes in a thread-safe way.  This is a very light-weight approach compared to using
+`mnesia` or other form of persistent storage.
+
+Here is an example:
 
 ```erlang
-F = emmap:open_counters("/tmp/mem.bin", 2),
+F  = emmap:open_counters("/tmp/mem.bin", 2),
 N1 = emmap:inc_counter(F, 1),
 N2 = emmap:inc_counter(F, 1, 5),
 N3 = emmap:inc_counter(F, 1),

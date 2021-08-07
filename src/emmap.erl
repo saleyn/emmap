@@ -286,15 +286,15 @@ open_counters(Filename, NumCounters) ->
     MMAP     = 
         case open(Filename, 0, Size, [create, read, write, shared, direct, nolock]) of
             {ok, F} when not Existing, NumCounters > 0 ->
-                ok = pwrite(F, 0, <<"EMMAP001", NumCounters:64/little-integer>>),
+                ok = pwrite(F, 0, <<"EMMAP01\n", NumCounters:64/little-integer>>),
                 {F, NumCounters};
             {ok, F} ->
                 case pread(F, 0, 16) of
-                    {ok, <<"EMMAP", _,_,_, N:64/little-integer>>} when N == NumCounters; NumCounters == 0 ->
+                    {ok, <<"EMMAP", _,_,$\n, N:64/little-integer>>} when N == NumCounters; NumCounters == 0 ->
                         {F, N};
                     {ok, _Other} when FileSize == Size ->
                         io:format("Initializing mmap: ~p\n", [_Other]),
-                        ok = pwrite(F, 0, <<"EMMAP001", NumCounters:64/little-integer>>),
+                        ok = pwrite(F, 0, <<"EMMAP01\n", NumCounters:64/little-integer>>),
                         lists:foldl(fun(I, _) ->
                             ok = pwrite(F, 16+I*8, <<0:64/little-integer>>),
                             []
@@ -394,16 +394,22 @@ shared_test() ->
     G = fun(One, Owner) ->
           {ok, MM} = emmap:open("test.data", 0, 8, [create, direct, read, write, shared, nolock]),
           One ! {start, self()},
-          receive
-            {One, Bin1 = <<"test1">>} ->
-              {ok, Bin1} = emmap:pread(MM, 0, byte_size(Bin1));
-            Other1 ->
-              throw({error, {one, Other1}})
-          end,
+          Bin =
+            receive
+              {One, Bin1 = <<"test1">>} ->
+                {ok, B} = emmap:pread(MM, 0, byte_size(Bin1)),
+                B;
+              Other1 ->
+                throw({error, {one, Other1}})
+            end,
+          % At this point value of Bin is this:
+          Bin = <<"test1">>,
           One ! {cont, self()},
           receive
-            {One, Bin2 = <<"test2">>} ->
-              {ok, Bin2} = emmap:pread(MM, 0, byte_size(Bin2));
+            {One, Bin2 = <<"test2">>} when Bin2 == Bin ->
+              % Note that previously bound binary changed under the hood
+              % because it's bound to the memory updated by another process
+              Bin = <<"test2">>;
             Other2 ->
               throw({error, {two, Other2}})
           end,
