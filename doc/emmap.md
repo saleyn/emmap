@@ -26,7 +26,7 @@ mmap_file() = #file_descriptor{}
 
 
 <pre><code>
-open_option() = read | write | create | truncate | {chmod, pos_integer()} | {size, pos_integer()} | direct | lock | nolock | private | shared | populate | anon | fixed | nocache | noreserve | nocache | auto_unlink | {address, pos_integer()}
+open_option() = anon | auto_unlink | create | debug | direct | fixed | lock | nocache | nolock | noreserve | populate | private | read | shared | shared_validate | sync | truncate | uninitialized | write | {address, pos_integer()} | {chmod, pos_integer()} | {size, pos_integer()}
 </code></pre>
 
 
@@ -45,7 +45,7 @@ resource() = binary()
 
 
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#close-1">close/1</a></td><td></td></tr><tr><td valign="top"><a href="#close_counters-1">close_counters/1</a></td><td>Close persistent memory-mapped file previously open with <code>open_counters/2</code></td></tr><tr><td valign="top"><a href="#inc_counter-2">inc_counter/2</a></td><td>Increment a counter number <code>CounterNumber</code> in the mmap file by one and return old value.</td></tr><tr><td valign="top"><a href="#init-0">init/0</a></td><td></td></tr><tr><td valign="top"><a href="#open-2">open/2</a></td><td>Open/create a memory-mapped file.</td></tr><tr><td valign="top"><a href="#open-4">open/4</a></td><td>Open/create a memory-mapped file.</td></tr><tr><td valign="top"><a href="#open_counters-1">open_counters/1</a></td><td>Open a persistent memory-mapped file with space for one 64-bit integer counter.</td></tr><tr><td valign="top"><a href="#open_counters-2">open_counters/2</a></td><td>Open a persistent memory-mapped file with space for several 64-bit integer counters.</td></tr><tr><td valign="top"><a href="#patomic-4">patomic/4</a></td><td>Perform an atomic operation on a 64-bit integer value at given <code>Position</code>
-using specified argument <code>Value</code>.</td></tr><tr><td valign="top"><a href="#position-2">position/2</a></td><td>Write <code>Data</code> bytes to a memory-mapped file at a given offset <code>At</code>.</td></tr><tr><td valign="top"><a href="#pread-3">pread/3</a></td><td>Read <code>Len</code> bytes from a memory-mapped file at a given offset <code>Off</code>.</td></tr><tr><td valign="top"><a href="#pwrite-3">pwrite/3</a></td><td>Write <code>Data</code> bytes to a memory-mapped file at a given offset <code>Off</code>.</td></tr><tr><td valign="top"><a href="#read-2">read/2</a></td><td>Read next <code>Len</code> bytes from a memory-mapped file.</td></tr><tr><td valign="top"><a href="#read_line-1">read_line/1</a></td><td></td></tr></table>
+using specified argument <code>Value</code>.</td></tr><tr><td valign="top"><a href="#patomic_read-2">patomic_read/2</a></td><td>Perform an atomic load operation on a 64-bit integer value at given <code>Position</code>.</td></tr><tr><td valign="top"><a href="#patomic_write-3">patomic_write/3</a></td><td>Perform an atomic store operation of a 64-bit integer <code>Value</code> at given <code>Position</code>.</td></tr><tr><td valign="top"><a href="#position-2">position/2</a></td><td>Write <code>Data</code> bytes to a memory-mapped file at a given offset <code>At</code>.</td></tr><tr><td valign="top"><a href="#pread-3">pread/3</a></td><td>Read <code>Len</code> bytes from a memory-mapped file at a given offset <code>Off</code>.</td></tr><tr><td valign="top"><a href="#pwrite-3">pwrite/3</a></td><td>Write <code>Data</code> bytes to a memory-mapped file at a given offset <code>Off</code>.</td></tr><tr><td valign="top"><a href="#read-2">read/2</a></td><td>Read next <code>Len</code> bytes from a memory-mapped file.</td></tr><tr><td valign="top"><a href="#read_line-1">read_line/1</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
@@ -140,6 +140,30 @@ Perform an atomic operation on a 64-bit integer value at given `Position`
 using specified argument `Value`.  The function returns an old value at that
 location.  This function is thread-safe and can be used for implementing
 persistent counters.
+
+<a name="patomic_read-2"></a>
+
+### patomic_read/2 ###
+
+<pre><code>
+patomic_read(File::<a href="#type-mmap_file">mmap_file()</a>, Position::pos_integer()) -&gt; Value::integer()
+</code></pre>
+<br />
+
+Perform an atomic load operation on a 64-bit integer value at given `Position`.
+This function is thread-safe and can be used for implementing persistent counters.
+
+<a name="patomic_write-3"></a>
+
+### patomic_write/3 ###
+
+<pre><code>
+patomic_write(File::<a href="#type-mmap_file">mmap_file()</a>, Position::pos_integer(), Value::integer()) -&gt; ok
+</code></pre>
+<br />
+
+Perform an atomic store operation of a 64-bit integer `Value` at given `Position`.
+This function is thread-safe and can be used for implementing persistent counters.
 
 <a name="position-2"></a>
 

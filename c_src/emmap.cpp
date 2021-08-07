@@ -23,19 +23,20 @@ static ErlNifResourceType* MMAP_RESOURCE;
 
 typedef struct
 {
-  size_t position;
-  int direct;
-  int prot;
-  bool closed;
-  bool debug;
+  size_t        position;
+  int           direct;
+  int           prot;
+  bool          closed;
+  bool          debug;
   ErlNifRWLock* rwlock;
-  void* mem;
-  size_t len;
-  bool auto_unlink;
-  char path[1024];
+  void*         mem;
+  size_t        len;
+  bool          auto_unlink;
+  char          path[1024];
 } mhandle;
 
 static int on_load(ErlNifEnv*, void**, ERL_NIF_TERM);
+static int on_upgrade(ErlNifEnv* env, void** priv_data, void**, ERL_NIF_TERM load_info);
 
 static int emmap_unmap(mhandle *handle, bool from_dtor)
 {
@@ -83,11 +84,14 @@ static ERL_NIF_TERM ATOM_NONE;
 static ERL_NIF_TERM ATOM_PRIVATE;
 static ERL_NIF_TERM ATOM_POPULATE;
 static ERL_NIF_TERM ATOM_SHARED;
+static ERL_NIF_TERM ATOM_SHARED_VALIDATE;
+static ERL_NIF_TERM ATOM_SYNC;
 static ERL_NIF_TERM ATOM_ANON;
 static ERL_NIF_TERM ATOM_FILE;
 static ERL_NIF_TERM ATOM_FIXED;
 static ERL_NIF_TERM ATOM_NOCACHE;
 static ERL_NIF_TERM ATOM_NORESERVE;
+static ERL_NIF_TERM ATOM_UNINITIALIZED;
 static ERL_NIF_TERM ATOM_AUTO_UNLINK;
 static ERL_NIF_TERM ATOM_ADD;
 static ERL_NIF_TERM ATOM_SUB;
@@ -100,33 +104,36 @@ static ERL_NIF_TERM ATOM_BOF;
 static ERL_NIF_TERM ATOM_CUR;
 static ERL_NIF_TERM ATOM_EOF;
 
-static ERL_NIF_TERM emmap_open     (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_read     (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_read_line(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_close    (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_pread    (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_pwrite   (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_position (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_patomic  (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_open         (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_read         (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_read_line    (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_close        (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_pread        (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_pwrite       (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_position     (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_patomic      (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_patomic_read (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_patomic_write(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 
 extern "C" {
 
   static ErlNifFunc nif_funcs[] =
   {
-    {"open_nif",      4, emmap_open},
-    {"close_nif",     1, emmap_close},
-    {"pread_nif",     3, emmap_pread},
-    {"pwrite_nif",    3, emmap_pwrite},
-    {"patomic_nif",   4, emmap_patomic},
-    {"position_nif",  3, emmap_position},
-    {"read_nif",      2, emmap_read},
-    {"read_line_nif", 1, emmap_read_line},
+    {"open_nif",          4, emmap_open},
+    {"close_nif",         1, emmap_close},
+    {"pread_nif",         3, emmap_pread},
+    {"pwrite_nif",        3, emmap_pwrite},
+    {"patomic_nif",       4, emmap_patomic},
+    {"patomic_read_nif",  2, emmap_patomic_read},
+    {"patomic_write_nif", 3, emmap_patomic_write},
+    {"position_nif",      3, emmap_position},
+    {"read_nif",          2, emmap_read},
+    {"read_line_nif",     1, emmap_read_line},
   };
 
 };
 
-ERL_NIF_INIT(emmap, nif_funcs, &on_load, nullptr, nullptr, nullptr);
-
+ERL_NIF_INIT(emmap, nif_funcs, &on_load, nullptr, on_upgrade, nullptr);
 
 static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
 {
@@ -139,39 +146,47 @@ static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
   ATOM_ERROR        = enif_make_atom(env, "error");
   ATOM_DEBUG        = enif_make_atom(env, "debug");
 
-  ATOM_ADDRESS      = enif_make_atom(env, "address");
-  ATOM_DIRECT       = enif_make_atom(env, "direct");
-  ATOM_READ         = enif_make_atom(env, "read");
-  ATOM_WRITE        = enif_make_atom(env, "write");
-  ATOM_CREATE       = enif_make_atom(env, "create");
-  ATOM_TRUNCATE     = enif_make_atom(env, "truncate");
-  ATOM_CHMOD        = enif_make_atom(env, "chmod");
-  ATOM_NONE         = enif_make_atom(env, "none");
-  ATOM_PRIVATE      = enif_make_atom(env, "private");
-  ATOM_POPULATE     = enif_make_atom(env, "populate");
-  ATOM_SHARED       = enif_make_atom(env, "shared");
-  ATOM_ANON         = enif_make_atom(env, "anon");
-  ATOM_FILE         = enif_make_atom(env, "file");
-  ATOM_FIXED        = enif_make_atom(env, "fixed");
-  ATOM_NOCACHE      = enif_make_atom(env, "nocache");
-  ATOM_NORESERVE    = enif_make_atom(env, "noreserve");
-  ATOM_AUTO_UNLINK  = enif_make_atom(env, "auto_unlink");
+  ATOM_ADDRESS          = enif_make_atom(env, "address");
+  ATOM_DIRECT           = enif_make_atom(env, "direct");
+  ATOM_READ             = enif_make_atom(env, "read");
+  ATOM_WRITE            = enif_make_atom(env, "write");
+  ATOM_CREATE           = enif_make_atom(env, "create");
+  ATOM_TRUNCATE         = enif_make_atom(env, "truncate");
+  ATOM_CHMOD            = enif_make_atom(env, "chmod");
+  ATOM_NONE             = enif_make_atom(env, "none");
+  ATOM_PRIVATE          = enif_make_atom(env, "private");
+  ATOM_POPULATE         = enif_make_atom(env, "populate");
+  ATOM_SHARED           = enif_make_atom(env, "shared");
+  ATOM_SHARED_VALIDATE  = enif_make_atom(env, "shared_validate");
+  ATOM_SYNC             = enif_make_atom(env, "sync");
+  ATOM_ANON             = enif_make_atom(env, "anon");
+  ATOM_FILE             = enif_make_atom(env, "file");
+  ATOM_FIXED            = enif_make_atom(env, "fixed");
+  ATOM_NOCACHE          = enif_make_atom(env, "nocache");
+  ATOM_NORESERVE        = enif_make_atom(env, "noreserve");
+  ATOM_AUTO_UNLINK      = enif_make_atom(env, "auto_unlink");
+  ATOM_UNINITIALIZED    = enif_make_atom(env, "uninitialized");
 
-  ATOM_BOF          = enif_make_atom(env, "bof");
-  ATOM_CUR          = enif_make_atom(env, "cur");
-  ATOM_EOF          = enif_make_atom(env, "eof");
+  ATOM_BOF              = enif_make_atom(env, "bof");
+  ATOM_CUR              = enif_make_atom(env, "cur");
+  ATOM_EOF              = enif_make_atom(env, "eof");
 
-  ATOM_LOCK         = enif_make_atom(env, "lock");
-  ATOM_NOLOCK       = enif_make_atom(env, "nolock");
+  ATOM_LOCK             = enif_make_atom(env, "lock");
+  ATOM_NOLOCK           = enif_make_atom(env, "nolock");
 
-  ATOM_ADD          = enif_make_atom(env, "add");
-  ATOM_SUB          = enif_make_atom(env, "sub");
-  ATOM_BAND         = enif_make_atom(env, "band");
-  ATOM_BOR          = enif_make_atom(env, "bor");
-  ATOM_BXOR         = enif_make_atom(env, "bxor");
-  ATOM_XCHG         = enif_make_atom(env, "xchg");
+  ATOM_ADD              = enif_make_atom(env, "add");
+  ATOM_SUB              = enif_make_atom(env, "sub");
+  ATOM_BAND             = enif_make_atom(env, "band");
+  ATOM_BOR              = enif_make_atom(env, "bor");
+  ATOM_BXOR             = enif_make_atom(env, "bxor");
+  ATOM_XCHG             = enif_make_atom(env, "xchg");
 
   return 0;
+}
+
+static int on_upgrade(ErlNifEnv* env, void** priv_data, void**, ERL_NIF_TERM load_info)
+{
+    return on_load(env, priv_data, load_info);
 }
 
 static ERL_NIF_TERM describe_error(ErlNifEnv* env, int err) {
@@ -196,6 +211,8 @@ static ERL_NIF_TERM describe_error(ErlNifEnv* env, int err) {
       return enif_make_atom(env, "enxio");
     case EOVERFLOW:
       return enif_make_atom(env, "eoverflow");
+    case EOPNOTSUPP:
+      return enif_make_atom(env, "eopnotsupp");
   }
   return enif_make_tuple2(env,
                           enif_make_atom(env, "errno"),
@@ -217,9 +234,9 @@ static void debug(mhandle* h, const char* fmt, Args&&... args)
     fprintf(stderr, fmt, std::forward<Args>(args)...);
 }
 
-static int decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flags, 
-                        long* open_flags,  long* mode, bool* direct, bool* lock,
-                        bool* auto_unlink, size_t* address, bool* debug)
+static bool decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flags, 
+                         long* open_flags,  long* mode, bool* direct, bool* lock,
+                         bool* auto_unlink, size_t* address, bool* debug)
 {
   bool l = true;
   bool d = false;
@@ -265,13 +282,21 @@ static int decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flags
       f |= MAP_POPULATE;
   #endif
 #endif
+    } else if (enif_is_identical(head, ATOM_SHARED_VALIDATE)) {
+      f |= MAP_SHARED_VALIDATE;
     } else if (enif_is_identical(head, ATOM_SHARED)) {
       f |= MAP_SHARED;
     } else if (enif_is_identical(head, ATOM_ANON)) {
       f |= MAP_ANONYMOUS;
+    } else if (enif_is_identical(head, ATOM_SYNC)) {
+      f |= MAP_SYNC;
+    } else if (enif_is_identical(head, ATOM_FIXED)) {
+      f |= MAP_FIXED;
 //  } else if (enif_is_identical(head, ATOM_FILE)) {
 //    f |= MAP_FILE;
     } else if (enif_is_identical(head, ATOM_NOCACHE)) {
+      f |= MAP_NOCACHE;
+    } else if (enif_is_identical(head, ATOM_UNINITIALIZED)) {
       f |= MAP_NOCACHE;
 #ifdef MAP_NORESERVE
     } else if (enif_is_identical(head, ATOM_NORESERVE)) {
@@ -289,9 +314,9 @@ static int decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flags
           enif_get_long(env, tuple[1], mode)) {
         continue;
       } else
-        return 0;
+        return false;
     } else {
-      return 0;
+      return false;
     }
   }
 
@@ -312,7 +337,7 @@ static int decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flags
   *direct = d;
   *lock   = l;
 
-  return 1;
+  return true;
 }
 
 static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
@@ -333,13 +358,17 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
   mhandle* handle = (mhandle*)enif_alloc_resource_compat(env, MMAP_RESOURCE,
                                                            sizeof(mhandle));
 
-  if (argc == 4
-      && enif_get_string(env, argv[0], handle->path, 1024, ERL_NIF_LATIN1)
-      && enif_get_ulong(env, argv[1], &offset)
-      && enif_get_ulong(env, argv[2], &len)
-      && decode_flags(env, argv[3], &prot, &flags, &open_flags, &mode, &direct,
-                      &lock, &auto_unlink, &address, &handle->debug)) {
+  if (argc != 4
+      || !enif_get_string(env, argv[0], handle->path, 1024, ERL_NIF_LATIN1)
+      || !enif_get_ulong(env, argv[1], &offset)
+      || !enif_get_ulong(env, argv[2], &len)
+      || !decode_flags(env, argv[3], &prot, &flags, &open_flags, &mode, &direct,
+                       &lock, &auto_unlink, &address, &handle->debug))
+    return enif_make_badarg(env);
 
+  int fd = -1;
+
+  if ((flags & MAP_ANON) == 0) {
     bool exists = access(handle->path, F_OK) == 0;
 
     if (!exists) {
@@ -349,30 +378,29 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
         return make_error_tuple(env, "Missing 'create' option");
     }
 
-    int fd = open(handle->path, open_flags, (mode_t)mode);
+    fd = open(handle->path, open_flags, (mode_t)mode);
+
     if (fd < 0) {
       debug(handle, "open: %s\r\n", strerror(errno));
       return make_error_tuple(env, errno);
     }
 
     off_t fsize = 0;
-    {
-      struct stat st;
-      if (fstat(fd, &st) < 0) {
-        debug(handle, "fstat: %s\r\n", strerror(errno));
-        int err = errno;
-        close(fd);
-        return make_error_tuple(env, err);
-      } else {
-        fsize = st.st_size;
-      }
+    struct stat st;
+    if (fstat(fd, &st) < 0) {
+      debug(handle, "fstat: %s\r\n", strerror(errno));
+      int err = errno;
+      close(fd);
+      return make_error_tuple(env, err);
+    } else {
+      fsize = st.st_size;
+    }
 
-      if (exists && len > 0 && fsize != long(len) && fsize > 0) {
-        char buf[128];
-        snprintf(buf, sizeof(buf), "File has different size (%ld) than requested (%ld)", fsize, len);
-        close(fd);
-        return make_error_tuple(env, buf);
-      }
+    if (exists && len > 0 && fsize != long(len) && fsize > 0) {
+      char buf[128];
+      snprintf(buf, sizeof(buf), "File has different size (%ld) than requested (%ld)", fsize, len);
+      close(fd);
+      return make_error_tuple(env, buf);
     }
 
     // Stretch the file size to the requested size
@@ -387,46 +415,41 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
         return make_error_tuple(env, err);
       }
     }
+  }
 
-    if (offset > 0) {
-			offset &= ~(sysconf(_SC_PAGE_SIZE) - 1); // offset for mmap() must be page aligned
+  off_t pa_offset = 0;
+  if (offset > 0) {
+    pa_offset = offset & ~(sysconf(_SC_PAGE_SIZE) - 1); // offset for mmap() must be page aligned
 
-      if (offset >= len) {
-				close(fd);
-				char buf[128]; snprintf(buf, sizeof(buf), "Offset %d is past end of file", offset);
-        return make_error_tuple(env, buf);
-			}
+    if (offset >= len) {
+      if (fd >= 0) close(fd);
+      char buf[128];
+      snprintf(buf, sizeof(buf), "Offset %ld is past end of file", offset);
+      return make_error_tuple(env, buf);
     }
-    void* res = mmap((void*)address, (size_t)len, prot, flags, fd, (size_t)offset);
-    if (res == MAP_FAILED) {
-      return make_error_tuple(env, errno);
-    }
+  }
+  void* res = mmap((void*)address, (size_t)len + offset - pa_offset, prot, flags, fd,
+                   (size_t)pa_offset);
+  if (res == MAP_FAILED)
+    return make_error_tuple(env, errno);
 
+  if (fd >= 0)
     close(fd);
 
-    if (lock)
-      handle->rwlock = enif_rwlock_create((char*)"mmap");
-    else
-      handle->rwlock = 0;
+  handle->rwlock = lock ? enif_rwlock_create((char*)"mmap") : 0;
 
-    handle->prot = prot;
-    handle->mem = res;
-    handle->len = len;
-    handle->closed = false;
-    handle->direct = direct;
-    handle->position = 0;
-    handle->auto_unlink = auto_unlink;
+  handle->prot = prot;
+  handle->mem = res;
+  handle->len = len;
+  handle->closed = false;
+  handle->direct = direct;
+  handle->position = 0;
+  handle->auto_unlink = auto_unlink;
 
-    ERL_NIF_TERM resource = enif_make_resource(env, handle);
-    enif_release_resource_compat(env, handle);
+  ERL_NIF_TERM resource = enif_make_resource(env, handle);
+  enif_release_resource_compat(env, handle);
 
-    return enif_make_tuple2(env,
-                            enif_make_atom(env, "ok"),
-                            resource);
-
-  } else {
-      return enif_make_badarg(env);
-  }
+  return enif_make_tuple2(env, enif_make_atom(env, "ok"), resource);
 }
 
 static ERL_NIF_TERM emmap_close(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
@@ -539,6 +562,57 @@ static ERL_NIF_TERM emmap_pwrite(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
     {
       return enif_make_badarg(env);
     }
+}
+
+/// Atomically read a 64-bit value from the memoty at given position
+/// Args:   Handle, Position::integer()
+/// Return: Value::integer()
+static ERL_NIF_TERM emmap_patomic_read(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  mhandle*      handle;
+  unsigned long pos;
+
+  if (!(argc==2
+        && enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
+        && enif_get_ulong   (env, argv[1], &pos)
+        && (pos + 8) <= handle->len
+     ))
+    return enif_make_badarg(env);
+
+  if (handle->closed)
+    return enif_make_badarg(env);
+
+
+  void* mem = (char*)handle->mem + pos;
+  auto  p   = static_cast<std::atomic<int64_t>*>(mem);
+  long  res = p->load(std::memory_order_relaxed);
+
+  return enif_make_tuple2(env, ATOM_OK, enif_make_long(env, res));
+}
+
+/// Atomically write a 64-bit value to the memoty at given position
+/// Args:   Handle, Position::integer(), Value::integer()
+static ERL_NIF_TERM emmap_patomic_write(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  mhandle*      handle;
+  unsigned long pos;
+  long          value;
+
+  if (!(argc==3
+        && enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
+        && enif_get_ulong   (env, argv[1], &pos)
+        && enif_get_long    (env, argv[2], &value)
+        && (pos + 8) <= handle->len
+     ))
+    return enif_make_badarg(env);
+
+  if (handle->closed)
+    return enif_make_badarg(env);
+
+  void* mem = (char*)handle->mem + pos;
+  ((std::atomic<int64_t>*)mem)->store(value);
+
+  return ATOM_OK;
 }
 
 /// Atomically add a 64-bit value to the memoty at given position

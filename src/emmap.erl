@@ -3,11 +3,11 @@
 -export([
     init/0,
     open/2, open/4, close/1, pread/3, pwrite/3, read/2, read_line/1, position/2,
-    patomic/4
+    patomic/4, patomic_read/2, patomic_write/3
 ]).
 -export([open_counters/1, open_counters/2, close_counters/1, inc_counter/2]).
 
--export_type([resource/0]).
+-export_type([resource/0, open_option/0]).
 
 -on_load(init/0).
 
@@ -18,16 +18,106 @@
 -include_lib("kernel/include/file.hrl").
 
 -type open_option() ::
-    read    | write | create | truncate
+    anon
+  | auto_unlink
+  | create
+  | debug
+  | direct
+  | fixed
+  | lock
+  | nocache
+  | nolock
+  | noreserve
+  | populate
+  | private
+  | read
+  | shared
+  | shared_validate
+  | sync
+  | truncate
+  | uninitialized
+  | write
+  | {address, pos_integer()}
   | {chmod,   pos_integer()}
   | {size,    pos_integer()}
-  | direct
-  | lock    | nolock
-  | private | shared
-  | populate| anon | fixed | nocache | noreserve
-  | nocache | auto_unlink
-  | {address, pos_integer()}
   .
+%% Options for opening a memory mapped file:
+%% <dl>
+%%   <dt>anon</dt>
+%%    <dd>Anonymous mapping. The mapping is not backed by any file;
+%%        its contents are initialized to zero. The offset argument should be zero.</dd>
+%%   <dt>auto_unlink</dt>
+%%    <dd>Automatically delete the mapped file after the mapped data was garbage collected.
+%%        This can be used when the mapped file is a file-based shared-memory area (e.g. `/dev/shm/...')
+%%        and is mapped in `direct' mode to free the memory after the data was gc'd</dd>
+%%   <dt>create</dt>
+%%    <dd>Allow to create mmap file if it doesn't exist.</dd>
+%%   <dt>debug</dt>
+%%    <dd>Turn on debug printing in the NIF library.</dd>
+%%   <dt>direct</dt>
+%%    <dd>Read/pread operations do not copy memory, but rather use "resource binaries" that
+%%        can change content if the underlying data is changed.  This is the most performant,
+%%        but also has other thread-safety implications when not using atomic operations.</dd>
+%%   <dt>fixed</dt>
+%%    <dd>Don't interpret addr as a hint: place the mapping at exactly that address.
+%%        The implementation aligns the given address to a multiple of the page size.</dd>
+%%   <dt>lock</dt>
+%%    <dd>Use a semaphore (read/write lock) to control state changes internally in the NIF
+%%        library. This is the default option.</dd>
+%%   <dt>nocache</dt>
+%%    <dd>Pages in this mapping are not retained in the kernel's memory cache.
+%%        If the system runs low on memory, pages in MAP_NOCACHE mappings will be among the
+%%        first to be reclaimed. NOTE: this option is only valid for Mac OS.</dd>
+%%   <dt>nolock</dt>
+%%    <dd>Don't use a semaphore (read/write lock) to control state changes internally in the NIF library</dd>
+%%   <dt>noreserve</dt>
+%%    <dd>Do not reserve swap space for this mapping.  When swap space is reserved, one has
+%%        the guarantee that it is possible to modify the mapping.</dd>
+%%   <dt>populate</dt>
+%%    <dd>Populate (prefault) page tables for a mapping.  For a file mapping, this causes
+%%        read-ahead on the file.  This will help to reduce blocking on page faults later.</dd>
+%%   <dt>private</dt>
+%%    <dd>Create a private copy-on-write mapping.  Updates to the mapping are not visible to
+%%        other processes mapping the same file, and are not carried through to the underlying
+%%        file.</dd>
+%%   <dt>read</dt>
+%%    <dd>Open for reading (this is default).</dd>
+%%   <dt>shared</dt>
+%%    <dd>Share this mapping.  Updates to the mapping are visible to other processes mapping
+%%        the same region, and (in the case of file-backed mappings) are carried through to
+%%        the underlying file. May be used in combination with `sync' to precisely control when
+%%        updates are carried through to the underlying file.</dd>
+%%   <dt>shared_validate</dt>
+%%    <dd>This flag provides the same behavior as `shared' except that `shared' mappings ignore
+%%        unknown flags in flags.  By contrast, when creating a mapping using `shared_validate',
+%%        the kernel verifies all passed flags are known and fails the mapping with the error
+%%        `eopnotsupp' for unknown flags.  This mapping type is also required to be able to use
+%%        some mapping flags (e.g., `sync')</dd>
+%%   <dt>sync</dt>
+%%    <dd>This flag is available only with the `shared_validate' mapping type; mappings of type
+%%        `shared' will silently ignore this flag.  This flag is supported only for files
+%%        supporting DAX (direct mapping of persistent memory).  For other files, creating a
+%%        mapping with this flag results in an `eopnotsupp' error.
+%%        Shared file mappings with this flag provide the guarantee that while some memory is
+%%        mapped writable in the address space of the process, it will be visible in the same
+%%        file at the same offset even after the system crashes or is rebooted.  In conjunction
+%%        with the use of appropriate CPU instructions, this provides users of such mappings
+%%        with a more efficient way of making data modifications persistent.</dd>
+%%   <dt>truncate</dt>
+%%    <dd>Truncate existing mmap file after it's open.</dd>
+%%   <dt>uninitialized</dt>
+%%    <dd>Don't clear anonymous pages.  This flag is intended to improve performance on
+%%        embedded devices.  This flag is honored only if the kernel was configured with
+%%        the `CONFIG_MMAP_ALLOW_UNINITIALIZED' option.</dd>
+%%   <dt>write</dt>
+%%    <dd>Open memory map for writing.</dd>
+%%   <dt>{address, pos_integer()}</dt>
+%%    <dd>Open mapping at the given memory address (sets `MAP_FIXED' on the memory mapped file)</dd>
+%%   <dt>{chmod,   pos_integer()}</dt>
+%%    <dd>Create mmap file with this mode (default: `0600')</dd>
+%%   <dt>{size,    pos_integer()}</dt>
+%%    <dd>Create/access memory map on this size.</dd>
+%% </dl>
 
 -type mmap_file() :: #file_descriptor{}.
 -type resource()  :: binary().
@@ -162,6 +252,25 @@ patomic(#file_descriptor{ module=?MODULE, data=Mem }, Off, Op, Value)
     patomic_nif(Mem, Off, Op, Value).
 
 patomic_nif(_,_,_,_) ->
+    {error, not_loaded}.
+
+%% @doc Perform an atomic store operation of a 64-bit integer `Value' at given `Position'.
+%% This function is thread-safe and can be used for implementing persistent counters.
+-spec patomic_write(File::mmap_file(), Position::pos_integer(), Value::integer()) -> ok.
+patomic_write(#file_descriptor{ module=?MODULE, data=Mem }, Off, Value)
+  when is_integer(Off), is_integer(Value) ->
+    patomic_write_nif(Mem, Off, Value).
+
+patomic_write_nif(_,_,_) ->
+    {error, not_loaded}.
+
+%% @doc Perform an atomic load operation on a 64-bit integer value at given `Position'.
+%% This function is thread-safe and can be used for implementing persistent counters.
+-spec patomic_read(File::mmap_file(), Position::pos_integer()) -> Value::integer().
+patomic_read(#file_descriptor{ module=?MODULE, data=Mem }, Off) when is_integer(Off) ->
+    patomic_read_nif(Mem, Off).
+
+patomic_read_nif(_,_) ->
     {error, not_loaded}.
 
 %% @doc Open a persistent memory-mapped file with space for one 64-bit integer counter
