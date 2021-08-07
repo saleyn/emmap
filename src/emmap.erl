@@ -41,6 +41,7 @@
   | {chmod,   pos_integer()}
   | {size,    pos_integer()}.
 %% Options for opening a memory mapped file:
+%%
 %% <dl>
 %%   <dt>anon</dt>
 %%    <dd>Anonymous mapping. The mapping is not backed by any file;
@@ -116,6 +117,7 @@
 %%    <dd>Create mmap file with this mode (default: `0600')</dd>
 %%   <dt>{size,    pos_integer()}</dt>
 %%    <dd>Create/access memory map on this size.</dd>
+%%
 %% </dl>
 
 -type mmap_file() :: #file_descriptor{}.
