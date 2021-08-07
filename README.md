@@ -1,5 +1,7 @@
 # Erlang MMAP `emmap`
 
+[![build](https://github.com/saleyn/emmap/actions/workflows/erlang.yml/badge.svg)](https://github.com/saleyn/emmap/actions/workflows/erlang.yml)
+
 This Erlang library provides a wrapper that allows you to memory map files into the Erlang memory space.  
 
 ## Authors

@@ -104,31 +104,31 @@ static ERL_NIF_TERM ATOM_BOF;
 static ERL_NIF_TERM ATOM_CUR;
 static ERL_NIF_TERM ATOM_EOF;
 
-static ERL_NIF_TERM emmap_open         (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_read         (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_read_line    (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_close        (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_pread        (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_pwrite       (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_position     (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_patomic      (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_patomic_read (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_patomic_write(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_open             (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_read             (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_read_line        (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_close            (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_pread            (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_pwrite           (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_position         (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_patomic          (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_patomic_read_int (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_patomic_write_int(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 
 extern "C" {
 
   static ErlNifFunc nif_funcs[] =
   {
-    {"open_nif",          4, emmap_open},
-    {"close_nif",         1, emmap_close},
-    {"pread_nif",         3, emmap_pread},
-    {"pwrite_nif",        3, emmap_pwrite},
-    {"patomic_nif",       4, emmap_patomic},
-    {"patomic_read_nif",  2, emmap_patomic_read},
-    {"patomic_write_nif", 3, emmap_patomic_write},
-    {"position_nif",      3, emmap_position},
-    {"read_nif",          2, emmap_read},
-    {"read_line_nif",     1, emmap_read_line},
+    {"open_nif",              4, emmap_open},
+    {"close_nif",             1, emmap_close},
+    {"pread_nif",             3, emmap_pread},
+    {"pwrite_nif",            3, emmap_pwrite},
+    {"patomic_nif",           4, emmap_patomic},
+    {"patomic_read_int_nif",  2, emmap_patomic_read_int},
+    {"patomic_write_int_nif", 3, emmap_patomic_write_int},
+    {"position_nif",          3, emmap_position},
+    {"read_nif",              2, emmap_read},
+    {"read_line_nif",         1, emmap_read_line},
   };
 
 };
@@ -567,7 +567,7 @@ static ERL_NIF_TERM emmap_pwrite(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
 /// Atomically read a 64-bit value from the memoty at given position
 /// Args:   Handle, Position::integer()
 /// Return: Value::integer()
-static ERL_NIF_TERM emmap_patomic_read(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+static ERL_NIF_TERM emmap_patomic_read_int(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
   mhandle*      handle;
   unsigned long pos;
@@ -592,7 +592,7 @@ static ERL_NIF_TERM emmap_patomic_read(ErlNifEnv* env, int argc, const ERL_NIF_T
 
 /// Atomically write a 64-bit value to the memoty at given position
 /// Args:   Handle, Position::integer(), Value::integer()
-static ERL_NIF_TERM emmap_patomic_write(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+static ERL_NIF_TERM emmap_patomic_write_int(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
   mhandle*      handle;
   unsigned long pos;

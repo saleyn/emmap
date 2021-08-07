@@ -1,0 +1,23 @@
+name: build
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    container:
+      image: erlang:24.0
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Compile
+      run:  make
+    - name: Run tests
+      run:  make test

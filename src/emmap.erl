@@ -3,7 +3,7 @@
 -export([
     init/0,
     open/2, open/4, close/1, pread/3, pwrite/3, read/2, read_line/1, position/2,
-    patomic/4, patomic_read/2, patomic_write/3
+    patomic/4, patomic_read_integer/2, patomic_write_integer/3
 ]).
 -export([open_counters/1, open_counters/2, close_counters/1, inc_counter/2]).
 
@@ -257,21 +257,21 @@ patomic_nif(_,_,_,_) ->
 
 %% @doc Perform an atomic store operation of a 64-bit integer `Value' at given `Position'.
 %% This function is thread-safe and can be used for implementing persistent counters.
--spec patomic_write(File::mmap_file(), Position::pos_integer(), Value::integer()) -> ok.
-patomic_write(#file_descriptor{ module=?MODULE, data=Mem }, Off, Value)
+-spec patomic_write_integer(File::mmap_file(), Position::pos_integer(), Value::integer()) -> ok.
+patomic_write_integer(#file_descriptor{ module=?MODULE, data=Mem }, Off, Value)
   when is_integer(Off), is_integer(Value) ->
-    patomic_write_nif(Mem, Off, Value).
+    patomic_write_int_nif(Mem, Off, Value).
 
-patomic_write_nif(_,_,_) ->
+patomic_write_int_nif(_,_,_) ->
     {error, not_loaded}.
 
 %% @doc Perform an atomic load operation on a 64-bit integer value at given `Position'.
 %% This function is thread-safe and can be used for implementing persistent counters.
--spec patomic_read(File::mmap_file(), Position::pos_integer()) -> Value::integer().
-patomic_read(#file_descriptor{ module=?MODULE, data=Mem }, Off) when is_integer(Off) ->
-    patomic_read_nif(Mem, Off).
+-spec patomic_read_integer(File::mmap_file(), Position::pos_integer()) -> Value::integer().
+patomic_read_integer(#file_descriptor{ module=?MODULE, data=Mem }, Off) when is_integer(Off) ->
+    patomic_read_int_nif(Mem, Off).
 
-patomic_read_nif(_,_) ->
+patomic_read_int_nif(_,_) ->
     {error, not_loaded}.
 
 %% @doc Open a persistent memory-mapped file with space for one 64-bit integer counter
@@ -371,12 +371,56 @@ simple_test() ->
 
 counter_test() ->
     F  = open_counters("/dev/shm/temp.bin", 1),
-    N1 = inc_counter(F, 1),
-    N2 = inc_counter(F, 1),
+    {ok,N1} = inc_counter(F, 0, 1),
+    {ok,N2} = inc_counter(F, 0, 1),
     close_counters(F),
     file:delete("/dev/shm/temp.bin"),
     ?assertEqual(0, N1),
     ?assertEqual(1, N2).
+
+shared_test() ->
+    F = fun(Owner) ->
+          {ok, MM} = emmap:open("test.data", 0, 8, [create, direct, read, write, shared, nolock]),
+          Two      = receive {start, PP} -> PP end,
+          ok = emmap:pwrite(MM, 0, <<"test1">>),
+          Two ! {self(), <<"test1">>},
+          receive {cont, Two} -> ok end,
+          ok = emmap:pwrite(MM, 0, <<"test2">>),
+          Two ! {self(), <<"test2">>},
+          receive {cont, Two} -> ok end,
+          Two   ! {done, 1},
+          Owner ! {done, MM}
+        end,
+    G = fun(One, Owner) ->
+          {ok, MM} = emmap:open("test.data", 0, 8, [create, direct, read, write, shared, nolock]),
+          One ! {start, self()},
+          receive
+            {One, Bin1 = <<"test1">>} ->
+              {ok, Bin1} = emmap:pread(MM, 0, byte_size(Bin1));
+            Other1 ->
+              throw({error, {one, Other1}})
+          end,
+          One ! {cont, self()},
+          receive
+            {One, Bin2 = <<"test2">>} ->
+              {ok, Bin2} = emmap:pread(MM, 0, byte_size(Bin2));
+            Other2 ->
+              throw({error, {two, Other2}})
+          end,
+          One ! {cont, self()},
+          receive
+            {done, 1} -> ok
+          end,
+          Owner ! {done, MM}
+        end,
+    Self = self(),
+    P1 = spawn_link(fun() -> F(Self)     end),
+    _  = spawn_link(fun() -> G(P1, Self) end),
+
+    receive {done, MM1} -> emmap:close(MM1) end,
+    receive {done, MM2} -> emmap:close(MM2) end,
+
+    file:delete("test.data").
     
 
 -endif.
