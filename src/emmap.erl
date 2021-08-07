@@ -39,8 +39,7 @@
   | write
   | {address, pos_integer()}
   | {chmod,   pos_integer()}
-  | {size,    pos_integer()}
-  .
+  | {size,    pos_integer()}.
 %% Options for opening a memory mapped file:
 %% <dl>
 %%   <dt>anon</dt>
