@@ -6,7 +6,8 @@
     patomic/4, patomic_read_integer/2, patomic_write_integer/3
 ]).
 -export([open_counters/1, open_counters/2, close_counters/1]).
--export([inc_counter/2, inc_counter/3, set_counter/3, read_counter/2]).
+-export([inc_counter/2, inc_counter/3, dec_counter/2, dec_counter/3]).
+-export([set_counter/3, read_counter/2]).
 
 -export_type([resource/0, open_option/0]).
 
@@ -313,23 +314,32 @@ open_counters(Filename, NumCounters) ->
 close_counters({MFile, _NumCnts}) ->
     close(MFile).
 
-%% @doc Increment a counter number `CounterNumber' in the mmap file by one and return old value.
-inc_counter({MFile, NumCnts}, CounterNumber) ->
-    inc_counter({MFile, NumCnts}, CounterNumber, 1).
+%% @doc Increment a counter number `CounterNum' in the mmap file by one and return old value.
+inc_counter({MFile, NumCnts}, CounterNum) ->
+    inc_counter({MFile, NumCnts}, CounterNum, 1).
 
-%% @doc Increment a counter number `CounterNumber' in the mmap file by `Count' and return old value.
-inc_counter({MFile, NumCnts}, CounterNumber, Count)
-        when NumCnts > CounterNumber, is_integer(CounterNumber), is_integer(Count) ->
-    patomic(MFile, 16+CounterNumber*8, add, Count).
+%% @doc Decrement a counter number `CounterNum' in the mmap file by one and return old value.
+dec_counter({MFile, NumCnts}, CounterNum) ->
+    dec_counter({MFile, NumCnts}, CounterNum, 1).
 
-%% @doc Set a counter number `CounterNumber' in the mmap file and return the old value.
-set_counter({MFile, NumCnts}, CounterNumber, Value)
-        when NumCnts > CounterNumber, is_integer(CounterNumber), is_integer(Value) ->
-    patomic(MFile, 16+CounterNumber*8, xchg, Value).
+%% @doc Increment a counter number `CounterNum' in the mmap file by `Count' and return old value.
+inc_counter({MFile, NumCnts}, CounterNum, Count)
+        when NumCnts > CounterNum, CounterNum >= 0, is_integer(CounterNum), is_integer(Count) ->
+    patomic(MFile, 16+CounterNum*8, add, Count).
 
-read_counter({MFile, NumCnts}, CounterNumber)
-        when NumCnts > CounterNumber, is_integer(CounterNumber) ->
-    patomic_read_integer(MFile, 16+CounterNumber*8).
+%% @doc Decrement a counter number `CounterNum' in the mmap file by `Count' and return old value.
+dec_counter({MFile, NumCnts}, CounterNum, Count)
+        when NumCnts > CounterNum, CounterNum >= 0, is_integer(CounterNum), is_integer(Count) ->
+    patomic(MFile, 16+CounterNum*8, sub, Count).
+
+%% @doc Set a counter number `CounterNum' in the mmap file and return the old value.
+set_counter({MFile, NumCnts}, CounterNum, Value)
+        when NumCnts > CounterNum, CounterNum >= 0, is_integer(CounterNum), is_integer(Value) ->
+    patomic(MFile, 16+CounterNum*8, xchg, Value).
+
+read_counter({MFile, NumCnts}, CounterNum)
+        when NumCnts > CounterNum, CounterNum >= 0, is_integer(CounterNum) ->
+    patomic_read_integer(MFile, 16+CounterNum*8).
   
 -ifdef(EUNIT).
 
@@ -385,13 +395,19 @@ counter_test() ->
     {ok,N3} = set_counter(F, 0, 5),
     {ok,N4} = set_counter(F, 0, 8),
     {ok,N5} = read_counter(F, 0),
+    {ok,N6} = dec_counter(F, 0),
+    {ok,N7} = dec_counter(F, 0, 3),
+    {ok,N8} = read_counter(F, 0),
     close_counters(F),
     file:delete("/dev/shm/temp.bin"),
     ?assertEqual(0, N1),
     ?assertEqual(1, N2),
     ?assertEqual(2, N3),
     ?assertEqual(5, N4),
-    ?assertEqual(8, N5).
+    ?assertEqual(8, N5),
+    ?assertEqual(8, N6),
+    ?assertEqual(7, N7),
+    ?assertEqual(4, N8).
 
 shared_test() ->
     F = fun(Owner) ->
