@@ -5,7 +5,8 @@
     open/2, open/4, close/1, pread/3, pwrite/3, read/2, read_line/1, position/2,
     patomic/4, patomic_read_integer/2, patomic_write_integer/3
 ]).
--export([open_counters/1, open_counters/2, close_counters/1, inc_counter/2]).
+-export([open_counters/1, open_counters/2, close_counters/1]).
+-export([inc_counter/2, inc_counter/3, set_counter/3]).
 
 -export_type([resource/0, open_option/0]).
 
@@ -320,6 +321,11 @@ inc_counter({MFile, NumCnts}, CounterNumber) ->
 inc_counter({MFile, NumCnts}, CounterNumber, Count)
         when NumCnts > CounterNumber, is_integer(CounterNumber), is_integer(Count) ->
     patomic(MFile, 16+CounterNumber*8, add, Count).
+
+%% @doc Set a counter number `CounterNumber' in the mmap file and return the old value.
+set_counter({MFile, NumCnts}, CounterNumber, Value)
+        when NumCnts > CounterNumber, is_integer(CounterNumber), is_integer(Value) ->
+    patomic(MFile, 16+CounterNumber*8, xchg, Value).
     
   
 -ifdef(EUNIT).
@@ -373,10 +379,14 @@ counter_test() ->
     F  = open_counters("/dev/shm/temp.bin", 1),
     {ok,N1} = inc_counter(F, 0, 1),
     {ok,N2} = inc_counter(F, 0, 1),
+    {ok,N3} = set_counter(F, 0, 5),
+    {ok,N4} = set_counter(F, 0, 8),
     close_counters(F),
     file:delete("/dev/shm/temp.bin"),
     ?assertEqual(0, N1),
-    ?assertEqual(1, N2).
+    ?assertEqual(1, N2),
+    ?assertEqual(2, N3),
+    ?assertEqual(5, N4).
 
 shared_test() ->
     F = fun(Owner) ->
