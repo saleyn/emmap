@@ -17,10 +17,16 @@ static ErlNifResourceType* MMAP_RESOURCE;
 # define MAP_NOCACHE (0)
 #endif
 
- // MAP_ANON is deprecated on Linux, and MAP_ANONYMOUS is not present on Mac
- #ifndef MAP_ANONYMOUS
- # define MAP_ANONYMOUS MAP_ANON
- #endif
+// MAP_ANON is deprecated on Linux, and MAP_ANONYMOUS is not present on Mac
+#ifndef MAP_ANONYMOUS
+# define MAP_ANONYMOUS MAP_ANON
+#endif
+
+#if (__GLIBC__ == 2 && __GLIBC_MINOR >= 32) || (__GLIBC__ > 2)
+# define strerror_compat strerrordesc_np
+#else
+# define strerror_compat strerror
+#endif
 
 typedef struct
 {
@@ -222,7 +228,7 @@ static int on_upgrade(ErlNifEnv* env, void** priv_data, void**, ERL_NIF_TERM loa
 }
 
 static ERL_NIF_TERM make_error_tuple(ErlNifEnv* env, int err) {
-  return enif_make_tuple2(env, ATOM_ERROR, enif_make_string(env, strerrordesc_np(err), ERL_NIF_LATIN1));
+  return enif_make_tuple2(env, ATOM_ERROR, enif_make_string(env, strerror_compat(err), ERL_NIF_LATIN1));
 }
 
 static ERL_NIF_TERM make_error_tuple(ErlNifEnv* env, const char* err) {
@@ -386,14 +392,14 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
     fd = open(handle->path, open_flags, (mode_t)mode);
 
     if (fd < 0) {
-      debug(handle, "open: %s\r\n", strerrordesc_np(errno));
+      debug(handle, "open: %s\r\n", strerror_compat(errno));
       return make_error_tuple(env, errno);
     }
 
     off_t fsize = 0;
     struct stat st;
     if (fstat(fd, &st) < 0) {
-      debug(handle, "fstat: %s\r\n", strerrordesc_np(errno));
+      debug(handle, "fstat: %s\r\n", strerror_compat(errno));
       int err = errno;
       close(fd);
       return make_error_tuple(env, err);
@@ -417,7 +423,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
       if (is_ok)
         debug(handle, "File %s resized to %d bytes\r\n", handle->path, len);
       else {
-        debug(handle, "ftruncate: %s\r\n", strerrordesc_np(errno));
+        debug(handle, "ftruncate: %s\r\n", strerror_compat(errno));
         int err = errno;
         close(fd);
         return make_error_tuple(env, err);
@@ -487,7 +493,7 @@ static ERL_NIF_TERM emmap_resize(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
 
   void* addr = mremap(handle->mem, handle->len, new_size, MREMAP_MAYMOVE);
   if (addr == (void*)-1) {
-    const char* err = strerrordesc_np(errno);
+    const char* err = strerror_compat(errno);
     RW_UNLOCK;
     return make_error_tuple(env, err);
   }

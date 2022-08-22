@@ -17,10 +17,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-    - name: Install sudo package
-      run:  apt update && apt install sudo
-    - name: Install apt packages
-      run:  apt install -yy grep binutils-multiarch
+    - name: Set up GCC
+      uses: egor-tensin/setup-gcc@v1
+      with:
+        version: latest
+        platform: x64
     - name: Compile
       run:  make
     - name: Run tests
