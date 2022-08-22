@@ -17,6 +17,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - name: Install apt packages
+      run:  sudo apt update && sudo apt install -yy grep binutils-multiarch
     - name: Compile
       run:  make
     - name: Run tests
