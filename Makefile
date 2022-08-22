@@ -3,16 +3,20 @@ REBAR=rebar3
 all: deps compile
 
 compile:
-	@$(REBAR) compile eunit
+	@TERM=dumb $(REBAR) compile
 
 clean:
 	@$(REBAR) clean
+	@make -C c_src clean >/dev/null 2>&1
 
 deps:
 	@$(REBAR) get-deps
 
 test eunit:
-	@$(REBAR) eunit
+	@TERM=dumb $(REBAR) eunit
+
+nif:
+	make -C c_src
 
 docs:
 	@$(REBAR) edoc
