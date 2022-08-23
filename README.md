@@ -106,17 +106,17 @@ that such binaries are referring directly to the mmap'ed memory.
 When passing `auto_unlink` option to `emmap:open/4`, the memory mapped file will be
 automatically deleted when it is closed.
 
-## Persistent FIFO single-process and multi-producer-single-consumer queues.
+## Persistent FIFO used as a container or guarded by a process.
 
 The `emmap_queue` module implements a persistent FIFO queue based on a memory-mapped file.
 This means that in-memory operations of enqueuing items are automatically persisted on disk.
 
-A single-process queue is used in a single process where the queue is used as a persistent
-container of messages.  The `open/3` is given an initial storage in bytes, which will
-automatically grow unless the `fixed_size` option is provided, in which case when the queue
-becomes full, a `push/2` call will return `{error, full}`.  In this example we are using
-`auto_unlink` option which automatically deletes the memory mapped file at the end of the
-test case (something you might not want in other cases):
+A queue used as a container will persistent messages stored in queue on disk, and has constant
+time complexity of the push and pop operations.  The `open/3` is given an initial storage in
+bytes, which will automatically grow unless the `fixed_size` option is provided, in which case
+when the queue becomes full, a `push/2` call will return `{error, full}`.  In the example below
+we are using `auto_unlink` option which automatically deletes the memory mapped file at the end
+of the test case (something you might not want in other cases):
 
 ```erlang
 {ok, Q} = emmap_queue:open(Filename, 1024, [auto_unlink]),
@@ -132,11 +132,11 @@ nil   = emmap_queue:pop_and_purge(Q).
 
 Use `emmap_queue:pop_and_purge/1` to reclaim the space in memory when the queue becomes empty.
 
-When a queue is wrapped in a `gen_server`, it is suitable for use in a
-multi-producer-single-consumer use case.  This is implemented using `emmap_queue:start_link/4`,
-`emmap_queue:enqueue/2`, and `emmap_queue:dequeue/1` functions.  In this example we are using
-`auto_unlink` option which automatically deletes the memory mapped file at the end of the
-test case (something you might not want in other cases):
+When a queue is wrapped in a `gen_server`, it is suitable for use in a multi-process use cases.
+This is implemented using `emmap_queue:start_link/4`,`emmap_queue:enqueue/2`, and
+`emmap_queue:dequeue/1` functions.  In the example below we are using the `auto_unlink` option
+which automatically deletes the memory mapped file at the end of the test case (something you
+might not want in other cases):
 
 
 ```erlang
