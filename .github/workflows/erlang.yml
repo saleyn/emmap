@@ -7,17 +7,58 @@ on:
     branches: [ master ]
 
 jobs:
-
-  build:
-
+  linux:
     runs-on: ubuntu-latest
+    name: OTP ${{ matrix.otp }} ${{ matrix.os }}.${{ matrix.compiler.compiler }}
 
     container:
-      image: erlang:24.0
+      image: erlang:${{matrix.otp}}
+
+    strategy:
+      matrix:
+        os: [ linux ]
+        compiler:
+          - { compiler: GNU-12,  CC: gcc-12,   CXX: g++-12 }
+          - { compiler: GNU-11,  CC: gcc-11,   CXX: g++-11 }
+          - { compiler: LLVM-12, CC: clang-12, CXX: clang++-12 }
+          - { compiler: LLVM-11, CC: clang-11, CXX: clang++-11 }
+        otp: ["24.2", "25.0.3"]
 
     steps:
     - uses: actions/checkout@v2
     - name: Compile
       run:  make
-    - name: Run tests
+    - name: Test
       run:  make test
+
+  macOS:
+    name: OTP ${{ matrix.otp }} ${{ matrix.os }}.${{ matrix.compiler.compiler }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ macos-latest ]
+        compiler:
+          - { compiler: XCode, CC: cc, CXX: c++ }
+        otp: ["24.2", "25.0.3"]
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install Base Dependencies
+        run: |
+          brew update > /dev/null || true
+          brew tap Homebrew/bundle
+          brew install erlang
+          brew install rebar3
+          #brew bundle --verbose
+      - name: Compile
+        env:
+          CC: ${{ matrix.compiler.CC }}
+          CXX: ${{ matrix.compiler.CXX }}
+          SRC_DIR: ${{ github.workspace }}
+          BUILD_DIR: ${{ github.workspace }}/build
+          INSTALL_PREFIX: ${{ github.workspace }}/install
+        run:  make
+      - name: Test
+        run:  make test
+
+
