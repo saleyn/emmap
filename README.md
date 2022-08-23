@@ -20,9 +20,8 @@ ok = file:close(Mem).
 ```
 The open options is a list containing zero or more [options](https://saleyn.github.io/emmap/emmap.html#type-open_option).
 
-A memory map can be closed either by calling `emmap:close/1` or `file:close/1`.
-
-From this point, `Mem` can be used either with the `file` operations:
+From this point, `Mem` can be used either with the `file` or with the `emmap` functions
+interchangeably:
 
 - `{ok, Binary} = file:pread(Mem, Position, Length)` read Length bytes at Position in the file.
 - `ok = file:pwrite(Mem, Position, Binary)` writes to the given position. 
@@ -30,14 +29,18 @@ From this point, `Mem` can be used either with the `file` operations:
 - `{ok, Pos} = file:position(Mem, Where)` see file:position/2 documentation.
 - `ok = file:close(Mem)`
 
-Additionally, the read/write operations can be performed by the corresponding functions in the `emmap` module.
+A memory map can be closed either by calling `emmap:close/1` or `file:close/1`. When using
+the `direct` option, and `emmap:close/1` is called, the memory map is not immediately closed,
+but will get automatically closed when all binaries that reference this memory map are garbage
+collected.
 
 ## Atomic operations on the memory mapped file
 
 The `emmap` application offers a way to do atomic `add`, `sub`, `xchg`, `cas` as well as bitwise
 `and`, `or`, `xor` operations using `emmap:patomic_*/3` and `emmap:patomic_cas/4` functions.
 
-Effectively this directly changes the content of the underlying memory and is thread-safe.
+Effectively this directly changes the content of the underlying memory, is thread-safe, and
+persistent.
 
 ```erlang
 {ok, OldValue} = emmap:patomic_add(Mem, Position, 1).
