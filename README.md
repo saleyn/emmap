@@ -90,6 +90,18 @@ shell1> emmap:pwrite(MM, 0, <<"test3">>).
 shell2> Bin.
 <<"test3">>
 ```
+Though this may seem odd that a bound `Bin` variable returns a different value when we printed
+it in the `shell2` the second time, it is the result of opening memory mapped file using the
+`direct` option.  In this case the binaries read from memory map point to the actual memory
+in that map rather than being copies of that memory.  For some applications, such as when
+using that memory to store atomic counters, this property can be very valuable.
+
+Using the option `direct` has the effect that the mmap file is not closed until all references
+to binaries coming out of read/pread have been garbage collected.  This is a consequence of
+that such binaries are referring directly to the mmap'ed memory.
+
+When passing `auto_unlink` option to `emmap:open/4`, the memory mapped file will be
+automatically deleted when it is closed.
 
 ## Persistent FIFO single-process and multi-producer-single-consumer queues.
 
@@ -135,9 +147,3 @@ a     = emmap_queue:dequeue(Pid),
 {c,d} = emmap_queue:dequeue(Pid),
 nil   = emmap_queue:dequeue(Pid).
 ```
-
-## Notes
-
-Using the option `direct` has the effect that the mmap file is not closed until all references
-to binaries coming out of read/pread have been garbage collected.  This is a consequence of
-that such binaries are referring directly to the mmap'ed memory.  
