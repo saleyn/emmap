@@ -76,6 +76,7 @@ Example:
 
 ```erlang
 shell1> {ok, MM, _Info} = emmap:open("/tmp/mem.data", 0, 8, [create, direct, read, write, shared, nolock]).
+shell2> {ok, MM, _Info} = emmap:open("/tmp/mem.data", 0, 8, [create, direct, read, write, shared, nolock]).
 
 shell1> emmap:pwrite(MM, 0, <<"test1">>).
 shell2> {ok, Bin} = emmap:pread(MM, 0, 5).
