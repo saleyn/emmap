@@ -171,9 +171,13 @@ static ERL_NIF_TERM ATOM_POPULATE;
 static ERL_NIF_TERM ATOM_PRIVATE;
 static ERL_NIF_TERM ATOM_READ;
 static ERL_NIF_TERM ATOM_SHARED;
+#ifndef __OSX__
 static ERL_NIF_TERM ATOM_SHARED_VALIDATE;
+#endif
 static ERL_NIF_TERM ATOM_SIZE;
+#ifndef __OSX__
 static ERL_NIF_TERM ATOM_SYNC;
+#endif
 static ERL_NIF_TERM ATOM_TRUE;
 static ERL_NIF_TERM ATOM_TRUNCATE;
 static ERL_NIF_TERM ATOM_UNINITIALIZED;
@@ -261,9 +265,13 @@ static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
   ATOM_PRIVATE          = enif_make_atom(env, "private");
   ATOM_READ             = enif_make_atom(env, "read");
   ATOM_SHARED           = enif_make_atom(env, "shared");
+#ifndef __OSX__
   ATOM_SHARED_VALIDATE  = enif_make_atom(env, "shared_validate");
+#endif
   ATOM_SIZE             = enif_make_atom(env, "size");
+#ifndef __OSX__
   ATOM_SYNC             = enif_make_atom(env, "sync");
+#endif
   ATOM_TRUE             = enif_make_atom(env, "true");
   ATOM_TRUNCATE         = enif_make_atom(env, "truncate");
   ATOM_UNINITIALIZED    = enif_make_atom(env, "uninitialized");
@@ -340,14 +348,18 @@ static bool decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flag
       f |= MAP_POPULATE;
   #endif
 #endif
+#ifndef __OSX__
     } else if (enif_is_identical(head, ATOM_SHARED_VALIDATE)) {
       f |= MAP_SHARED_VALIDATE;
+#endif
     } else if (enif_is_identical(head, ATOM_SHARED)) {
       f |= MAP_SHARED;
     } else if (enif_is_identical(head, ATOM_ANON)) {
       f |= MAP_ANONYMOUS;
+#ifndef __OSX__
     } else if (enif_is_identical(head, ATOM_SYNC)) {
       f |= MAP_SYNC;
+#endif
     } else if (enif_is_identical(head, ATOM_FIXED)) {
       f |= MAP_FIXED;
     } else if (enif_is_identical(head, ATOM_FIXED_SIZE)) {
@@ -600,7 +612,9 @@ static ERL_NIF_TERM emmap_resize(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
 
   if (handle->fixed_size)
     return make_error(env, ATOM_FIXED_SIZE);
-
+#ifdef __OSX__
+  return make_error(env, ATOM_FIXED_SIZE);
+#else
   if ((handle->prot & PROT_WRITE) == 0) {
     return make_error(env, ATOM_EACCES);
   }
@@ -627,6 +641,7 @@ static ERL_NIF_TERM emmap_resize(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
   RW_UNLOCK;
 
   return enif_make_tuple2(env, ATOM_OK, enif_make_ulong(env, new_size));
+#endif
 }
 
 static ERL_NIF_TERM emmap_pwrite(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
