@@ -1,8 +1,9 @@
 %%%-----------------------------------------------------------------------------
 %%% @doc     Persistent FIFO queue
-%%%          The FIFO queue can be used for single producer single consumer
-%%%          application without the use of a gen-server, and also for multiple
-%%%          producers single consumer application when using a gen-server.
+%%%          The FIFO queue can be used as a persistent container of messages
+%%%          with constant time push and pop operations.  Additionally, this
+%%%          module provides a gen_server API, which wraps the queue for use
+%%%          in multi-process applications.
 %%%          The queue is stored in a memory-mapped file, and it automatically
 %%%          grows if the messages are not dequeued from the queue.
 %%%          See test cases at the end of this module for sample use cases.
