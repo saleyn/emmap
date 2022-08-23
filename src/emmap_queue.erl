@@ -12,7 +12,7 @@
 %%% Created: 2021-12-10
 %%%-----------------------------------------------------------------------------
 -module(emmap_queue).
--export([open_queue/3, close_queue/1]).
+-export([open/3, close/1]).
 -export([purge_queue/1, is_empty/1, length/1, push/2, pop/1, pop_and_purge/1]).
 
 -export([start_link/4, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
@@ -62,7 +62,7 @@ info(Name) ->
 
 init([Filename, SegmSize, Opts]) ->
   erlang:process_flag(trap_exit, true),
-  {ok, Mem}  = open_queue(Filename, SegmSize, Opts),
+  {ok, Mem}  = open(Filename, SegmSize, Opts),
   {ok, #state{mem=Mem, filename=Filename, segm_sz=SegmSize}}.
 
 handle_call({push, Term}, _From, #state{mem=Mem} = State) ->
@@ -97,13 +97,13 @@ handle_info({'EXIT', _Pid, Reason}, State) ->
   {stop, Reason, State}.
 
 terminate(_Reason, #state{mem=Mem}) ->
-  close_queue(Mem).
+  close(Mem).
 
 %%------------------------------------------------------------------------------
 %% Raw segment access functions
 %%------------------------------------------------------------------------------
 
-open_queue(Filename, Size, Opts) when is_list(Filename), is_integer(Size), is_list(Opts) ->
+open(Filename, Size, Opts) when is_list(Filename), is_integer(Size), is_list(Opts) ->
   ok = filelib:ensure_dir(filename:dirname(Filename)),
   case emmap:open(Filename, 0, Size, [create, read, write | Opts]) of
     {ok, Mem, #{exist := true, size := SegmSize}} ->
@@ -126,7 +126,7 @@ open_queue(Filename, Size, Opts) when is_list(Filename), is_integer(Size), is_li
       Error
   end.
 
-close_queue(Mem) ->
+close(Mem) ->
   emmap:close(Mem).
 
 purge_queue(Mem) ->
@@ -249,7 +249,7 @@ pop_internal(Mem) ->
 %% Single-producer-single-consumer
 spsc_queue_test() ->
   Filename  = "/tmp/queue1.bin",
-  {ok, Mem} = open_queue(Filename, 1024, [auto_unlink]),  %% Automatically delete file
+  {ok, Mem} = open(Filename, 1024, [auto_unlink]),  %% Automatically delete file
   ?assert(filelib:is_regular(Filename)),
   % Enqueue data
   [?assertEqual(ok, push(Mem, I)) || I <- [a,b,c,1,2,3]],

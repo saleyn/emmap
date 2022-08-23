@@ -109,14 +109,14 @@ The `emmap_queue` module implements a persistent FIFO queue based on a memory-ma
 This means that in-memory operations of enqueuing items are automatically persisted on disk.
 
 A single-process queue is used in a single process where the queue is used as a persistent
-container of messages.  The `open_queue/3` is given an initial storage in bytes, which will
+container of messages.  The `open/3` is given an initial storage in bytes, which will
 automatically grow unless the `fixed_size` option is provided, in which case when the queue
 becomes full, a `push/2` call will return `{error, full}`.  In this example we are using
 `auto_unlink` option which automatically deletes the memory mapped file at the end of the
 test case (something you might not want in other cases):
 
 ```erlang
-{ok, Q} = emmap_queue:open_queue(Filename, 1024, [auto_unlink]),
+{ok, Q} = emmap_queue:open(Filename, 1024, [auto_unlink]),
 ok = emmap_queue:push(Q, a),
 ok = emmap_queue:push(Q, {b,1}),
 ok = emmap_queue:push(Q, {c,d}),
