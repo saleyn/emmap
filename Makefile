@@ -18,6 +18,9 @@ test eunit:
 nif:
 	make -C c_src
 
+publish: docs clean
+	$(REBAR) hex $(if $(replace),publish --replace,cut)
+
 docs:
 	@$(REBAR) edoc
 

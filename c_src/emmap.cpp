@@ -8,6 +8,8 @@
 #include <string.h>
 #include <atomic>
 #include <memory>
+#include <cassert>
+#include <list>
 #include <erl_nif.h>
 
 static ErlNifResourceType* MMAP_RESOURCE;
@@ -28,56 +30,108 @@ static ErlNifResourceType* MMAP_RESOURCE;
 # define strerror_compat strerror
 #endif
 
-typedef struct
+template <typename... Args>
+static void debug(bool dbg, const char* fmt, Args&&... args)
 {
-  size_t        position;
-  int           direct;
-  int           prot;
-  bool          closed;
-  bool          debug;
-  ErlNifRWLock* rwlock;
-  void*         mem;
-  size_t        len;
-  size_t        max_inc_size;   // Below this threshold, when resizing, the size will double
-  bool          auto_unlink;
-  char          path[1024];
-} mhandle;
+  if (dbg)
+    fprintf(stderr, fmt, std::forward<Args>(args)...);
+}
+
+struct mhandle
+{
+  mhandle(void* mem,   const char* file, size_t size, bool direct,
+          bool fixed_size,  size_t max_inc_size,
+          bool auto_unlink, int    prot, bool   lock, bool dbg)
+    : position(0)
+    , direct(direct)
+    , prot(prot)
+    , dbg(dbg)
+    , rwlock(lock ? enif_rwlock_create((char*)"mmap") : nullptr)
+    , mem(mem)
+    , direct_mem()
+    , len(size)
+    , max_inc_size(max_inc_size)
+    , fixed_size(fixed_size)
+    , auto_unlink(auto_unlink)
+  {
+    snprintf(path, sizeof(path), "%s", file);
+  }
+
+  ~mhandle()
+  {
+    unmap(true);
+
+    if (direct) {
+      for (auto& slot : direct_mem) {
+        debug(dbg, "Unmapping direct memory %p of size %lu\r\n", slot.first, slot.second);
+        munmap(slot.first, slot.second);
+      }
+      direct_mem.clear();
+    }
+
+    if (rwlock != 0)
+      enif_rwlock_destroy(rwlock);
+  }
+
+  bool unmap(bool destruct)
+  {
+    auto result = true;
+
+    if (mem) {
+      debug(dbg, "Unmapping memory %p of size %lu\r\n", mem, len);
+      if (destruct || !direct) {
+        debug(dbg, "Releasing memory map %p of size %lu\r\n", mem, len);
+        result = munmap(mem, len) == 0;
+      } else if (direct) {
+        // We must not unmap the memory that might be in use by some binaries
+        // until the destructor is called.
+        debug(dbg, "Preserving memory map %p of size %lu\r\n", mem, len);
+        direct_mem.push_back(MemSlot(mem, len));
+      }
+
+      mem = nullptr;
+    }
+
+    if (auto_unlink) {
+      debug(dbg, "Removing memory mapped file %s\r\n", path);
+      unlink(path);
+    }
+
+    return result;
+  }
+
+  bool closed() const { return mem == nullptr; }
+
+  using MemSlot = std::pair<void*, size_t>;
+  using MemList = std::list<MemSlot>;
+
+  size_t          position;
+  bool            direct;
+  int             prot;
+  bool            dbg;
+  ErlNifRWLock*   rwlock;
+  void*           mem;
+  MemList         direct_mem;     // Stash of allocated mem segments used in direct mode
+  size_t          len;
+  size_t          max_inc_size;   // Below this threshold, when resizing, the size will double
+  bool            fixed_size;     // Don't allow memory to be resized
+  bool            auto_unlink;
+  char            path[1024];
+};
 
 template <typename... Args>
 static void debug(mhandle* h, const char* fmt, Args&&... args)
 {
-  if (h->debug)
-    fprintf(stderr, fmt, std::forward<Args>(args)...);
+  debug(h->dbg, fmt, std::forward<Args>(args)...);
 }
 
 static int on_load(ErlNifEnv*, void**, ERL_NIF_TERM);
 static int on_upgrade(ErlNifEnv* env, void** priv_data, void**, ERL_NIF_TERM load_info);
 
-static int emmap_unmap(mhandle* handle, bool from_dtor)
-{
-  if (handle->mem == nullptr)
-    debug(handle, "Calling dtor on mem=NULL\r\n");
-  else {
-    debug(handle, "Calling dtor on mem=%p\r\n", handle->mem);
-
-    if (from_dtor || !handle->direct) {
-      int result = munmap(handle->mem, handle->len);
-      handle->mem = 0;
-      return result;
-    } else {
-      handle->closed = true;
-    }
-  }
-  return 0;
-}
-
 void emmap_dtor(ErlNifEnv* env, void* arg)
 {
-  mhandle* handle = (mhandle*)arg;
-  emmap_unmap(handle, true);
-
-  // only the destructor destroys the rwlock
-  if (handle->rwlock != 0) enif_rwlock_destroy(handle->rwlock);
+  assert(arg);
+  static_cast<mhandle*>(arg)->~mhandle();  // Call the destructor
 }
 
 #define RW_UNLOCK if (handle->rwlock != 0) enif_rwlock_rwunlock(handle->rwlock)
@@ -85,15 +139,12 @@ void emmap_dtor(ErlNifEnv* env, void* arg)
 #define R_UNLOCK  if (handle->rwlock != 0) enif_rwlock_runlock(handle->rwlock)
 #define R_LOCK    if (handle->rwlock != 0) enif_rwlock_rlock(handle->rwlock)
 
-static ERL_NIF_TERM ATOM_ADD;
 static ERL_NIF_TERM ATOM_ADDRESS;
 static ERL_NIF_TERM ATOM_ALIGNMENT;
 static ERL_NIF_TERM ATOM_ANON;
 static ERL_NIF_TERM ATOM_AUTO_UNLINK;
-static ERL_NIF_TERM ATOM_BAND;
 static ERL_NIF_TERM ATOM_BOF;
-static ERL_NIF_TERM ATOM_BOR;
-static ERL_NIF_TERM ATOM_BXOR;
+static ERL_NIF_TERM ATOM_CANNOT_CREATE_MAP;
 static ERL_NIF_TERM ATOM_CHMOD;
 static ERL_NIF_TERM ATOM_CLOSED;
 static ERL_NIF_TERM ATOM_CREATE;
@@ -104,9 +155,11 @@ static ERL_NIF_TERM ATOM_EACCES;
 static ERL_NIF_TERM ATOM_ENOMEM;
 static ERL_NIF_TERM ATOM_EOF;
 static ERL_NIF_TERM ATOM_ERROR;
+static ERL_NIF_TERM ATOM_EXIST;
 static ERL_NIF_TERM ATOM_FALSE;
 static ERL_NIF_TERM ATOM_FILE;
 static ERL_NIF_TERM ATOM_FIXED;
+static ERL_NIF_TERM ATOM_FIXED_SIZE;
 static ERL_NIF_TERM ATOM_LOCK;
 static ERL_NIF_TERM ATOM_MAX_INC_SIZE;
 static ERL_NIF_TERM ATOM_NOCACHE;
@@ -119,13 +172,12 @@ static ERL_NIF_TERM ATOM_PRIVATE;
 static ERL_NIF_TERM ATOM_READ;
 static ERL_NIF_TERM ATOM_SHARED;
 static ERL_NIF_TERM ATOM_SHARED_VALIDATE;
-static ERL_NIF_TERM ATOM_SUB;
+static ERL_NIF_TERM ATOM_SIZE;
 static ERL_NIF_TERM ATOM_SYNC;
 static ERL_NIF_TERM ATOM_TRUE;
 static ERL_NIF_TERM ATOM_TRUNCATE;
 static ERL_NIF_TERM ATOM_UNINITIALIZED;
 static ERL_NIF_TERM ATOM_WRITE;
-static ERL_NIF_TERM ATOM_XCHG;
 
 static ERL_NIF_TERM emmap_open             (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM emmap_resize           (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
@@ -177,15 +229,12 @@ static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
   ErlNifResourceFlags flags = (ErlNifResourceFlags)(ERL_NIF_RT_CREATE | ERL_NIF_RT_TAKEOVER);
   MMAP_RESOURCE = enif_open_resource_type(env, nullptr, "mmap_resource", &emmap_dtor, flags, 0);
 
-  ATOM_ADD              = enif_make_atom(env, "add");
   ATOM_ADDRESS          = enif_make_atom(env, "address");
   ATOM_ALIGNMENT        = enif_make_atom(env, "alignment");
   ATOM_ANON             = enif_make_atom(env, "anon");
   ATOM_AUTO_UNLINK      = enif_make_atom(env, "auto_unlink");
-  ATOM_BAND             = enif_make_atom(env, "band");
   ATOM_BOF              = enif_make_atom(env, "bof");
-  ATOM_BOR              = enif_make_atom(env, "bor");
-  ATOM_BXOR             = enif_make_atom(env, "bxor");
+  ATOM_CANNOT_CREATE_MAP= enif_make_atom(env, "cannot_create_map");
   ATOM_CHMOD            = enif_make_atom(env, "chmod");
   ATOM_CLOSED           = enif_make_atom(env, "closed");
   ATOM_CREATE           = enif_make_atom(env, "create");
@@ -196,9 +245,11 @@ static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
   ATOM_ENOMEM           = enif_make_atom(env, "enomem");
   ATOM_EOF              = enif_make_atom(env, "eof");
   ATOM_ERROR            = enif_make_atom(env, "error");
+  ATOM_EXIST            = enif_make_atom(env, "exist");
   ATOM_FALSE            = enif_make_atom(env, "false");
   ATOM_FILE             = enif_make_atom(env, "file");
   ATOM_FIXED            = enif_make_atom(env, "fixed");
+  ATOM_FIXED_SIZE       = enif_make_atom(env, "fixed_size");
   ATOM_LOCK             = enif_make_atom(env, "lock");
   ATOM_MAX_INC_SIZE     = enif_make_atom(env, "max_inc_size");
   ATOM_NOCACHE          = enif_make_atom(env, "nocache");
@@ -211,13 +262,12 @@ static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
   ATOM_READ             = enif_make_atom(env, "read");
   ATOM_SHARED           = enif_make_atom(env, "shared");
   ATOM_SHARED_VALIDATE  = enif_make_atom(env, "shared_validate");
-  ATOM_SUB              = enif_make_atom(env, "sub");
+  ATOM_SIZE             = enif_make_atom(env, "size");
   ATOM_SYNC             = enif_make_atom(env, "sync");
   ATOM_TRUE             = enif_make_atom(env, "true");
   ATOM_TRUNCATE         = enif_make_atom(env, "truncate");
   ATOM_UNINITIALIZED    = enif_make_atom(env, "uninitialized");
   ATOM_WRITE            = enif_make_atom(env, "write");
-  ATOM_XCHG             = enif_make_atom(env, "xchg");
 
   return 0;
 }
@@ -242,12 +292,12 @@ static ERL_NIF_TERM make_error(ErlNifEnv* env, ERL_NIF_TERM err_atom) {
 static bool decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flags, 
                          long* open_flags,  long* mode, bool* direct, bool* lock,
                          bool* auto_unlink, size_t* address, bool* debug,
-                         size_t* max_inc_size)
+                         size_t* max_inc_size, bool* fixed_size)
 {
   bool   l = true;
   bool   d = false;
   int    f = MAP_FILE;
-  int    p = 0;
+  int    p = PROT_READ;
   int    arity;
   size_t tmp;
   const  ERL_NIF_TERM* tuple;
@@ -258,6 +308,9 @@ static bool decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flag
   *mode         = 0600;
   *debug        = false;
   *max_inc_size = 64*1024*1024;
+  *fixed_size   = false;
+  *prot         = 0;
+  *flags        = 0;
 
   ERL_NIF_TERM head;
   while (enif_get_list_cell(env, list, &head, &list)) {
@@ -279,9 +332,6 @@ static bool decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flag
     } else if (enif_is_identical(head, ATOM_WRITE)) {
       p |= PROT_WRITE;
       *open_flags |= O_RDWR;
-//    } else if (enif_is_identical(head, ATOM_NONE)) {
-//    p |= PROT_NONE;
-
     } else if (enif_is_identical(head, ATOM_PRIVATE)) {
       f |= MAP_PRIVATE;
 #if ERL_NIF_MINOR_VERSION > 4
@@ -300,6 +350,8 @@ static bool decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flag
       f |= MAP_SYNC;
     } else if (enif_is_identical(head, ATOM_FIXED)) {
       f |= MAP_FIXED;
+    } else if (enif_is_identical(head, ATOM_FIXED_SIZE)) {
+      *fixed_size = true;
 //  } else if (enif_is_identical(head, ATOM_FILE)) {
 //    f |= MAP_FILE;
     } else if (enif_is_identical(head, ATOM_NOCACHE)) {
@@ -359,20 +411,21 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
   int prot;
   long open_flags;
   long mode;
-  bool direct, lock, auto_unlink;
+  bool lock, direct, auto_unlink, dbg, fixed_size;
   unsigned long int len;
   unsigned long int offset;
-  size_t address;
+  size_t address, max_inc_size;
+  char   path[1024];
 
   static_assert(sizeof(long int) == sizeof(size_t), "Architecture not supported");
 
-  mhandle* handle = (mhandle*)enif_alloc_resource(MMAP_RESOURCE, sizeof(mhandle));
   if (argc != 4
-      || !enif_get_string(env, argv[0], handle->path, 1024, ERL_NIF_LATIN1)
+      || !enif_get_string(env, argv[0], path, sizeof(path), ERL_NIF_LATIN1)
       || !enif_get_ulong(env, argv[1], &offset)
       || !enif_get_ulong(env, argv[2], &len)
-      || !decode_flags(env, argv[3], &prot, &flags, &open_flags, &mode, &direct,
-                       &lock, &auto_unlink, &address, &handle->debug, &handle->max_inc_size))
+      || !decode_flags(env, argv[3], &prot, &flags, &open_flags, &mode,
+                       &direct, &lock, &auto_unlink,
+                       &address, &dbg, &max_inc_size, &fixed_size))
     return enif_make_badarg(env);
 
   int fd = -1;
@@ -380,7 +433,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
   bool exists = false;
 
   if ((flags & MAP_ANON) == 0) {
-    exists = access(handle->path, F_OK) == 0;
+    exists = access(path, F_OK) == 0;
 
     if (!exists) {
       if (len == 0)
@@ -389,17 +442,17 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
         return make_error_tuple(env, "Missing 'create' option");
     }
 
-    fd = open(handle->path, open_flags, (mode_t)mode);
+    fd = open(path, open_flags, (mode_t)mode);
 
     if (fd < 0) {
-      debug(handle, "open: %s\r\n", strerror_compat(errno));
+      debug(dbg, "open: %s\r\n", strerror_compat(errno));
       return make_error_tuple(env, errno);
     }
 
     off_t fsize = 0;
     struct stat st;
     if (fstat(fd, &st) < 0) {
-      debug(handle, "fstat: %s\r\n", strerror_compat(errno));
+      debug(dbg, "fstat: %s\r\n", strerror_compat(errno));
       int err = errno;
       close(fd);
       return make_error_tuple(env, err);
@@ -410,7 +463,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
     if (exists && len > 0 && fsize != long(len) && fsize > 0) {
       char buf[1280];
       snprintf(buf, sizeof(buf), "File %s has different size (%ld) than requested (%ld)",
-               handle->path, fsize, len);
+               path, fsize, len);
       close(fd);
       return make_error_tuple(env, buf);
     }
@@ -421,9 +474,9 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
       bool is_ok = ftruncate(fd, 0)   == 0 &&
                    ftruncate(fd, len) == 0;
       if (is_ok)
-        debug(handle, "File %s resized to %d bytes\r\n", handle->path, len);
+        debug(dbg, "File %s resized to %d bytes\r\n", path, len);
       else {
-        debug(handle, "ftruncate: %s\r\n", strerror_compat(errno));
+        debug(dbg, "ftruncate: %s\r\n", strerror_compat(errno));
         int err = errno;
         close(fd);
         return make_error_tuple(env, err);
@@ -450,59 +503,28 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
   if (fd >= 0)
     close(fd);
 
-  handle->rwlock = lock ? enif_rwlock_create((char*)"mmap") : 0;
+  auto handle = (mhandle*)enif_alloc_resource(MMAP_RESOURCE, sizeof(mhandle));
 
-  handle->prot = prot;
-  handle->mem = res;
-  handle->len = len;
-  handle->closed = false;
-  handle->direct = direct;
-  handle->position = 0;
-  handle->auto_unlink = auto_unlink;
+  if (!handle) {
+    int err = errno;
+    munmap(res, size);
+    char buf[256];
+    snprintf(buf, sizeof(buf), "Cannot allocate resource: %s\n", strerror_compat(err));
+    return make_error_tuple(env, buf);
+  }
 
+  new (handle) mhandle(res, path, size, direct, fixed_size, max_inc_size, auto_unlink, prot, lock, dbg);
   ERL_NIF_TERM resource = enif_make_resource(env, handle);
   enif_release_resource(handle);
 
-  return enif_make_tuple4(env, ATOM_OK, exists ? ATOM_TRUE : ATOM_FALSE,
-                          resource, enif_make_ulong(env, size));
-}
+  ERL_NIF_TERM keys[] = {ATOM_EXIST, ATOM_SIZE};
+  ERL_NIF_TERM vals[] = {exists ? ATOM_TRUE : ATOM_FALSE, enif_make_ulong(env, size)};
 
-static ERL_NIF_TERM emmap_resize(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
-{
-  unsigned long new_size;
-  mhandle* handle;
-  if (argc!=2
-      || !enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
-      || !enif_get_ulong(env, argv[1], &new_size)
-     )
-    return enif_make_badarg(env);
+  ERL_NIF_TERM map;
+  if (!enif_make_map_from_arrays(env, keys, vals, 2, &map))
+    return make_error_tuple(env, ATOM_CANNOT_CREATE_MAP);
 
-  if ((handle->prot & PROT_WRITE) == 0) {
-    return make_error(env, ATOM_EACCES);
-  }
-
-  RW_LOCK;
-  if (handle->closed) {
-    RW_UNLOCK;
-    return make_error(env, ATOM_CLOSED);
-  }
-
-  if (new_size == 0)
-    new_size = handle->len < handle->max_inc_size
-             ? handle->len * 2 : handle->len + handle->max_inc_size;
-
-  void* addr = mremap(handle->mem, handle->len, new_size, MREMAP_MAYMOVE);
-  if (addr == (void*)-1) {
-    const char* err = strerror_compat(errno);
-    RW_UNLOCK;
-    return make_error_tuple(env, err);
-  }
-
-  handle->mem = addr;
-  handle->len = new_size;
-  RW_UNLOCK;
-
-  return enif_make_tuple2(env, ATOM_OK, enif_make_ulong(env, new_size));
+  return enif_make_tuple3(env, ATOM_OK, resource, map);
 }
 
 static ERL_NIF_TERM emmap_close(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
@@ -513,11 +535,11 @@ static ERL_NIF_TERM emmap_close(ErlNifEnv* env, int argc, const ERL_NIF_TERM arg
 
   int res;
   RW_LOCK;
-  res = emmap_unmap(handle, false);
+  res = handle->unmap(false);
   RW_UNLOCK;
 
-  if(handle->auto_unlink && unlink(handle->path) != 0)
-    return make_error_tuple(env, errno);
+  if (handle->auto_unlink)
+    res = unlink(handle->path);
 
   return res == 0 ? ATOM_OK : make_error_tuple(env, errno);
 }
@@ -555,7 +577,7 @@ static ERL_NIF_TERM emmap_pread(ErlNifEnv* env, int argc, const ERL_NIF_TERM arg
     return make_error(env, ATOM_ENOMEM);
 
   R_LOCK;
-  if (handle->closed) {
+  if (handle->closed()) {
     R_UNLOCK;
     return make_error(env, ATOM_CLOSED);
   }
@@ -564,6 +586,47 @@ static ERL_NIF_TERM emmap_pread(ErlNifEnv* env, int argc, const ERL_NIF_TERM arg
 
   ERL_NIF_TERM res = enif_make_binary(env, &bin);
   return enif_make_tuple2(env, ATOM_OK, res);
+}
+
+static ERL_NIF_TERM emmap_resize(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  unsigned long new_size;
+  mhandle* handle;
+  if (argc!=2
+      || !enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
+      || !enif_get_ulong(env, argv[1], &new_size)
+     )
+    return enif_make_badarg(env);
+
+  if (handle->fixed_size)
+    return make_error(env, ATOM_FIXED_SIZE);
+
+  if ((handle->prot & PROT_WRITE) == 0) {
+    return make_error(env, ATOM_EACCES);
+  }
+
+  RW_LOCK;
+  if (handle->closed()) {
+    RW_UNLOCK;
+    return make_error(env, ATOM_CLOSED);
+  }
+
+  if (new_size == 0)
+    new_size = handle->len < handle->max_inc_size
+             ? handle->len * 2 : handle->len + handle->max_inc_size;
+
+  void* addr = mremap(handle->mem, handle->len, new_size, MREMAP_MAYMOVE);
+  if (addr == (void*)-1) {
+    const char* err = strerror_compat(errno);
+    RW_UNLOCK;
+    return make_error_tuple(env, err);
+  }
+
+  handle->mem = addr;
+  handle->len = new_size;
+  RW_UNLOCK;
+
+  return enif_make_tuple2(env, ATOM_OK, enif_make_ulong(env, new_size));
 }
 
 static ERL_NIF_TERM emmap_pwrite(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
@@ -584,7 +647,7 @@ static ERL_NIF_TERM emmap_pwrite(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
   }
 
   RW_LOCK;
-  if (handle->closed) {
+  if (handle->closed()) {
     RW_UNLOCK;
     return make_error(env, ATOM_CLOSED);
   }
@@ -610,7 +673,7 @@ static ERL_NIF_TERM emmap_patomic_read_int(ErlNifEnv* env, int argc, const ERL_N
      ))
     return enif_make_badarg(env);
 
-  if (handle->closed)
+  if (handle->closed())
     return make_error(env, ATOM_CLOSED);
 
 
@@ -637,7 +700,7 @@ static ERL_NIF_TERM emmap_patomic_write_int(ErlNifEnv* env, int argc, const ERL_
      ))
     return enif_make_badarg(env);
 
-  if (handle->closed)
+  if (handle->closed())
     return make_error(env, ATOM_CLOSED);
 
   void* mem = (char*)handle->mem + pos;
@@ -666,7 +729,7 @@ static ERL_NIF_TERM emmap_patomic_add(ErlNifEnv* env, int argc, const ERL_NIF_TE
   if ((handle->prot & PROT_WRITE) == 0)
     return make_error(env, ATOM_EACCES);
 
-  if (handle->closed)
+  if (handle->closed())
     return make_error(env, ATOM_CLOSED);
 
   void* mem = (char*)handle->mem + pos;
@@ -694,7 +757,7 @@ static ERL_NIF_TERM emmap_patomic_sub(ErlNifEnv* env, int argc, const ERL_NIF_TE
   if ((handle->prot & PROT_WRITE) == 0)
     return make_error(env, ATOM_EACCES);
 
-  if (handle->closed)
+  if (handle->closed())
     return make_error(env, ATOM_CLOSED);
 
   void* mem = (char*)handle->mem + pos;
@@ -722,7 +785,7 @@ static ERL_NIF_TERM emmap_patomic_and(ErlNifEnv* env, int argc, const ERL_NIF_TE
   if ((handle->prot & PROT_WRITE) == 0)
     return make_error(env, ATOM_EACCES);
 
-  if (handle->closed)
+  if (handle->closed())
     return make_error(env, ATOM_CLOSED);
 
   void* mem = (char*)handle->mem + pos;
@@ -750,7 +813,7 @@ static ERL_NIF_TERM emmap_patomic_or(ErlNifEnv* env, int argc, const ERL_NIF_TER
   if ((handle->prot & PROT_WRITE) == 0)
     return make_error(env, ATOM_EACCES);
 
-  if (handle->closed)
+  if (handle->closed())
     return make_error(env, ATOM_CLOSED);
 
   void* mem = (char*)handle->mem + pos;
@@ -778,7 +841,7 @@ static ERL_NIF_TERM emmap_patomic_xor(ErlNifEnv* env, int argc, const ERL_NIF_TE
   if ((handle->prot & PROT_WRITE) == 0)
     return make_error(env, ATOM_EACCES);
 
-  if (handle->closed)
+  if (handle->closed())
     return make_error(env, ATOM_CLOSED);
 
   void* mem = (char*)handle->mem + pos;
@@ -806,7 +869,7 @@ static ERL_NIF_TERM emmap_patomic_xchg(ErlNifEnv* env, int argc, const ERL_NIF_T
   if ((handle->prot & PROT_WRITE) == 0)
     return make_error(env, ATOM_EACCES);
 
-  if (handle->closed)
+  if (handle->closed())
     return make_error(env, ATOM_CLOSED);
 
   void* mem = (char*)handle->mem + pos;
@@ -818,7 +881,7 @@ static ERL_NIF_TERM emmap_patomic_xchg(ErlNifEnv* env, int argc, const ERL_NIF_T
 /// with the new_val if the value is equal to the `old_val`.
 /// If the memory at given `pos` is not aligned to long, return `{error, alignment}`.
 /// If CAS fails, return `{false, OldVal}`, where OldVal is the value currently read at `pos`.
-/// Otherwise return `true`.
+/// Otherwise return `{true, OldVal}`.
 static ERL_NIF_TERM emmap_patomic_cas(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
   mhandle*      handle;
@@ -837,7 +900,7 @@ static ERL_NIF_TERM emmap_patomic_cas(ErlNifEnv* env, int argc, const ERL_NIF_TE
   if ((handle->prot & PROT_WRITE) == 0)
     return make_error(env, ATOM_EACCES);
 
-  if (handle->closed)
+  if (handle->closed())
     return make_error(env, ATOM_CLOSED);
 
   void* mem = (char*)handle->mem + pos;
@@ -846,12 +909,10 @@ static ERL_NIF_TERM emmap_patomic_cas(ErlNifEnv* env, int argc, const ERL_NIF_TE
   if (!std::align(sizeof(long), sizeof(long), mem, sz))
     return enif_make_tuple2(env, ATOM_ERROR, ATOM_ALIGNMENT);
 
-  auto p = reinterpret_cast<std::atomic<long>*>(mem);
-  if  (p->compare_exchange_weak(old_val, new_val, std::memory_order_release,
-                                std::memory_order_relaxed))
-    return ATOM_TRUE;
-  else
-    return enif_make_tuple2(env, ATOM_FALSE, enif_make_long(env, old_val));
+  auto p   = reinterpret_cast<std::atomic<long>*>(mem);
+  auto res = p->compare_exchange_weak(old_val, new_val, std::memory_order_release,
+                                      std::memory_order_relaxed);
+  return enif_make_tuple2(env, res ? ATOM_TRUE : ATOM_FALSE, enif_make_long(env, old_val));
 }
 
 static ERL_NIF_TERM emmap_read(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
@@ -928,17 +989,17 @@ static ERL_NIF_TERM emmap_read_line(ErlNifEnv* env, int argc, const ERL_NIF_TERM
   }
   // Step to next byte if EOF is not reached
   if (not got_eof)
-    handle->position ++;
+    handle->position++;
 
   no_crlf_len = linelen = handle->position - start;
 
   if (not got_eof) {
     // Found LF -- exclude it from line
-    no_crlf_len --;
+    no_crlf_len--;
     // If line length before \n is non-zero check if we have \r before \n
     if ((no_crlf_len > 0) && (*(current - 1) == '\r')) {
       have_cr = true;
-      no_crlf_len --;
+      no_crlf_len--;
     }
   }
 

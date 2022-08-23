@@ -42,6 +42,7 @@
   | truncate
   | uninitialized
   | write
+  | fixed_size
   | {address,      pos_integer()}
   | {chmod,        pos_integer()}
   | {size,         pos_integer()}
@@ -117,6 +118,8 @@
 %%        the `CONFIG_MMAP_ALLOW_UNINITIALIZED' option.</dd>
 %%   <dt>write</dt>
 %%    <dd>Open memory map for writing.</dd>
+%%   <dt>fixed_size</dt>
+%%    <dd>Don't allow the memory to be resized</dd>
 %%   <dt>{address, pos_integer()}</dt>
 %%    <dd>Open mapping at the given memory address (sets `MAP_FIXED' on the memory mapped file)</dd>
 %%   <dt>{chmod, pos_integer()}</dt>
@@ -131,6 +134,11 @@
 
 -type mmap_file() :: #file_descriptor{}.
 -type resource()  :: binary().
+
+-type open_extra_info() :: #{exist => boolean(), size => non_neg_integer()}.
+%% Extra information returned by the call to `emmap:open/2,3'.
+%% The value of `exist' true means that an existing memory map was open. The `size'
+%% represents the size of the memory map that was open.
 
 init() ->
     SoName =
@@ -152,7 +160,7 @@ init() ->
 %% If creating a new file, `[create, read, write, {size, N}]' options are required.
 %% For opening an existing file for writing `[read, write]' options are required.
 -spec open(string()|binary(), [open_option()]) ->
-        {ok, Existing::boolean(), mmap_file(), Size::non_neg_integer()} | {error, term()}.
+        {ok, mmap_file(), open_extra_info()} | {error, term()}.
 open(FileName, Options) when is_binary(FileName) ->
     open(binary_to_list(FileName), Options);
 open(FileName, Options) when is_list(FileName) ->
@@ -172,14 +180,14 @@ open(FileName, Options) when is_list(FileName) ->
           Offset::pos_integer(),
           Length::pos_integer(),
           Options::[ open_option() ]) ->
-                 {ok, Existing::boolean(), mmap_file(), Size::non_neg_integer()} | {error, term()}.
+                 {ok, mmap_file(), open_extra_info()} | {error, term()}.
 open(FileName, Off, Len, Options) when is_binary(FileName) ->
     open(binary_to_list(FileName), Off, Len, Options);
 open(FileName, Off, Len, Options) when is_list(FileName), is_integer(Off), is_integer(Len) ->
     case open_nif(FileName, Off, Len, Options) of
-        {ok, Existing, Mem, Size} ->
-            {ok, Existing, #file_descriptor{module=?MODULE, data=Mem}, Size};
-        Error ->
+        {ok, Mem, Info} ->
+            {ok, #file_descriptor{module=?MODULE, data=Mem}, Info};
+        {error, _} = Error ->
             Error
     end.
 
@@ -329,10 +337,10 @@ patomic_xchg_nif(_,_,_) ->
     erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Perform an atomic compare and swap (CAS) operation on a 64-bit integer value
-%% at given `Position' using specified argument `Value'.  The function returns an
-%% old value at that location.
+%% at given `Position' using specified argument `Value'.  The function returns a
+%% tuple `{Success, OldVal}', where `OldVal' is the old value at that location.
 -spec patomic_cas(File::mmap_file(), Position::pos_integer(), integer(), integer()) ->
-        true | {false, integer()} | {error, atom()} | no_return().
+        {boolean(), integer()} | {error, atom()} | no_return().
 patomic_cas(#file_descriptor{module=?MODULE, data=Mem}, Off, OldValue, Value)
   when is_integer(Off), is_integer(OldValue), is_integer(Value) ->
     patomic_cas_nif(Mem, Off, OldValue, Value).
@@ -369,10 +377,10 @@ open_counters(Filename, NumCounters) ->
     FileSize = filelib:file_size(Filename),
     MMAP     = 
         case open(Filename, 0, Size, [create, read, write, shared, direct, nolock]) of
-            {ok, _Existing = false, F, _Size} when NumCounters > 0 ->
+            {ok, F, #{exist := false}} when NumCounters > 0 ->
                 ok = pwrite(F, 0, <<"EMMAP01\n", NumCounters:64/little-integer>>),
                 {F, NumCounters};
-            {ok, true, F, _Size} ->
+            {ok, F, #{exist := true}} ->
                 case pread(F, 0, 16) of
                     {ok, <<"EMMAP", _,_,$\n, N:64/little-integer>>} when N == NumCounters; NumCounters == 0 ->
                         {F, N};
@@ -431,12 +439,12 @@ simple_test() ->
     ok = file:close(File),
 
     %% with direct+shared, the contents of a binary may change
-    {ok, _, MFile, 8}  = emmap:open("test.data", 0, 8, [direct, shared, nolock]),
-    {ok,         Mem}  = file:pread(MFile, 2, 2),
-    <<"cd">>           = Mem,
-    {error,   eacces}  = file:pwrite(MFile, 2, <<"xx">>),
+    {ok, MFile, #{size := 8}} = emmap:open("test.data", 0, 8, [direct, shared, nolock]),
+    {ok, Mem}       = file:pread(MFile, 2, 2),
+    <<"cd">>        = Mem,
+    {error, eacces} = file:pwrite(MFile, 2, <<"xx">>),
 
-    {ok, _, MFile2, 8} = emmap:open("test.data", 0, 8, [read, write, shared]),
+    {ok, MFile2, #{size := 8}} = emmap:open("test.data", 0, 8, [read, write, shared]),
     ok                 = file:pwrite(MFile2, 2, <<"xx">>),
     {ok,     <<"xx">>} = file:pread(MFile, 2, 2),
 
@@ -450,22 +458,25 @@ simple_test() ->
     ok = file:pwrite(MFile2, 0, <<0:64>>),
     {ok, <<0:64>>} = file:pread(MFile, 0, 8),
 
-    {ok,  0} = emmap:patomic_add(MFile2,  0,10),
-    {ok, 10} = emmap:patomic_add(MFile2,  0,10),
-    {ok, 20} = emmap:patomic_sub(MFile2,  0, 5),
-    {ok, 15} = emmap:patomic_sub(MFile2,  0,12),
-    {ok,  3} = emmap:patomic_and(MFile2,  0, 7),
-    {ok,  3} = emmap:patomic_or(MFile2,   0, 7),
-    {ok,  7} = emmap:patomic_xor(MFile2,  0, 9),
-    {ok, 14} = emmap:patomic_xchg(MFile2, 0,10),
-    {ok, 10} = emmap:patomic_xchg(MFile2, 0, 0),
+    {ok,  0}    = emmap:patomic_add(MFile2,  0,10),
+    {ok, 10}    = emmap:patomic_add(MFile2,  0,10),
+    {ok, 20}    = emmap:patomic_sub(MFile2,  0, 5),
+    {ok, 15}    = emmap:patomic_sub(MFile2,  0,12),
+    {ok,  3}    = emmap:patomic_and(MFile2,  0, 7),
+    {ok,  3}    = emmap:patomic_or(MFile2,   0, 7),
+    {ok,  7}    = emmap:patomic_xor(MFile2,  0, 9),
+    {ok, 14}    = emmap:patomic_xchg(MFile2, 0,10),
+    {ok, 10}    = emmap:patomic_xchg(MFile2, 0, 0),
+    {true,   0} = emmap:patomic_cas(MFile2,  0, 0,  20),
+    {false, 20} = emmap:patomic_cas(MFile2,  0, 10, 20),
+    {true,  20} = emmap:patomic_cas(MFile2,  0, 20,  0),
 
     file:close(MFile),
     file:close(MFile2),
     
-    {ok, _, MFile3, 8} = emmap:open("test.data", 0, 8,
+    {ok, MFile3, #{exist := true, size := 8}} = emmap:open("test.data", 0, 8,
         [direct, read, write, shared, nolock, {address, 16#512800000000}]),
-    {ok,     <<0:64>>} = file:pread(MFile3, 0, 8),
+    {ok, <<0:64>>} = file:pread(MFile3, 0, 8),
     file:close(MFile3),
 
     file:delete("test.data").
@@ -493,8 +504,8 @@ counter_test() ->
 
 shared_test() ->
     F = fun(Owner) ->
-          {ok, _, MM, 8} = emmap:open("test.data", 0, 8, [create, direct, read, write, shared, nolock]),
-          Two            = receive {start, PP} -> PP end,
+          {ok, MM, #{size := 8}} = emmap:open("test.data", 0, 8, [create, direct, read, write, shared, nolock]),
+          Two = receive {start, PP} -> PP end,
           ok = emmap:pwrite(MM, 0, <<"test1">>),
           Two ! {self(), <<"test1">>},
           receive {cont, Two} -> ok end,
@@ -505,7 +516,7 @@ shared_test() ->
           Owner ! {done, MM}
         end,
     G = fun(One, Owner) ->
-          {ok, _, MM, 8} = emmap:open("test.data", 0, 8, [create, direct, read, write, shared, nolock]),
+          {ok, MM, #{size := 8}} = emmap:open("test.data", 0, 8, [create, direct, read, write, shared, nolock]),
           One ! {start, self()},
           Bin =
             receive

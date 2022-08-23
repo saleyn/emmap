@@ -13,14 +13,16 @@ This Erlang library provides a wrapper that allows you to memory map files into 
 
 The basic usage is
 ```erlang
-{ok, Mem} = emmap:open("filename", [read, shared, direct]),
-{ok, Binary} = file:pread(Mem, 100, 40),
+{ok, Mem, _Info} = emmap:open("filename", [read, shared, direct]),
+{ok, Binary}     = file:pread(Mem, 100, 40),
 ...
 ok = file:close(Mem).
 ```
 The open options is a list containing zero or more [options](https://saleyn.github.io/emmap/emmap.html#type-open_option).
 
-From this point, `Mem` can be used with the `file` operations:
+A memory map can be closed either by calling `emmap:close/1` or `file:close/1`.
+
+From this point, `Mem` can be used either with the `file` operations:
 
 - `{ok, Binary} = file:pread(Mem, Position, Length)` read Length bytes at Position in the file.
 - `ok = file:pwrite(Mem, Position, Binary)` writes to the given position. 
@@ -32,13 +34,13 @@ Additionally, the read/write operations can be performed by the corresponding fu
 
 ## Atomic operations on the memory mapped file
 
-The `emmap` application offers a way to do atomic ADD, SUB, XCHG as well as bitwise
-AND, OR, XOR operations using `emmap:patomic/4` function.
+The `emmap` application offers a way to do atomic `add`, `sub`, `xchg`, `cas` as well as bitwise
+`and`, `or`, `xor` operations using `emmap:patomic_*/3` and `emmap:patomic_cas/4` functions.
 
 Effectively this directly changes the content of the underlying memory and is thread-safe.
 
 ```erlang
-{ok, OldValue} = emmap:patomic(Mem, Position, add, 1).
+{ok, OldValue} = emmap:patomic_add(Mem, Position, 1).
 ```
 This approach allows to implement persistent atomic counters that survive node restarts.
 
@@ -73,8 +75,7 @@ access to the memory mapped file.
 Example:
 
 ```erlang
-shell1> {ok, MM} = emmap:open("/tmp/mem.data", 0, 8, [create, direct, read, write, shared, nolock]).
-shell2> {ok, MM} = emmap:open("/tmp/mem.data", 0, 8, [create, direct, read, write, shared, nolock]).
+shell1> {ok, MM, _Info} = emmap:open("/tmp/mem.data", 0, 8, [create, direct, read, write, shared, nolock]).
 
 shell1> emmap:pwrite(MM, 0, <<"test1">>).
 shell2> {ok, Bin} = emmap:pread(MM, 0, 5).
@@ -87,6 +88,51 @@ shell2> Bin.
 shell1> emmap:pwrite(MM, 0, <<"test3">>).
 shell2> Bin.
 <<"test3">>
+```
+
+## Persistent FIFO single-process and multi-producer-single-consumer queues.
+
+The `emmap_queue` module implements a persistent FIFO queue based on a memory-mapped file.
+This means that in-memory operations of enqueuing items are automatically persisted on disk.
+
+A single-process queue is used in a single process where the queue is used as a persistent
+container of messages.  The `open_queue/3` is given an initial storage in bytes, which will
+automatically grow unless the `fixed_size` option is provided, in which case when the queue
+becomes full, a `push/2` call will return `{error, full}`.  In this example we are using
+`auto_unlink` option which automatically deletes the memory mapped file at the end of the
+test case (something you might not want in other cases):
+
+```erlang
+{ok, Q} = emmap_queue:open_queue(Filename, 1024, [auto_unlink]),
+ok = emmap_queue:push(Q, a),
+ok = emmap_queue:push(Q, {b,1}),
+ok = emmap_queue:push(Q, {c,d}),
+
+a     = emmap_queue:pop(Q),
+{b,1} = emmap_queue:pop(Q),
+{c,d} = emmap_queue:pop(Q),
+nil   = emmap_queue:pop_and_purge(Q).
+```
+
+Use `emmap_queue:pop_and_purge/1` to reclaim the space in memory when the queue becomes empty.
+
+When a queue is wrapped in a `gen_server`, it is suitable for use in a
+multi-producer-single-consumer use case.  This is implemented using `emmap_queue:start_link/4`,
+`emmap_queue:enqueue/2`, and `emmap_queue:dequeue/1` functions.  In this example we are using
+`auto_unlink` option which automatically deletes the memory mapped file at the end of the
+test case (something you might not want in other cases):
+
+
+```erlang
+{ok, Pid} = emmap_queue:start_link(?MODULE, Filename, 1024, [auto_unlink]),
+ok = emmap_queue:enqueue(Pid, a),
+ok = emmap_queue:enqueue(Pid, {b,1}),
+ok = emmap_queue:enqueue(Pid, {c,d}),
+
+a     = emmap_queue:dequeue(Pid),
+{b,1} = emmap_queue:dequeue(Pid),
+{c,d} = emmap_queue:dequeue(Pid),
+nil   = emmap_queue:dequeue(Pid).
 ```
 
 ## Notes

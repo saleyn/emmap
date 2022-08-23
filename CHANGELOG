@@ -1,0 +1,1 @@
+2022-08-21 Add persistent queue and non-backward-compatible change to return value of emmap:open/3.

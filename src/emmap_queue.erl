@@ -12,8 +12,8 @@
 %%% Created: 2021-12-10
 %%%-----------------------------------------------------------------------------
 -module(emmap_queue).
--export([open_segment/3, close_segment/1]).
--export([purge_segment/1, is_empty/1, length/1, push/2, pop/1, pop_and_purge/1]).
+-export([open_queue/3, close_queue/1]).
+-export([purge_queue/1, is_empty/1, length/1, push/2, pop/1, pop_and_purge/1]).
 
 -export([start_link/4, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 -export([enqueue/2, dequeue/1, info/1]).
@@ -62,7 +62,7 @@ info(Name) ->
 
 init([Filename, SegmSize, Opts]) ->
   erlang:process_flag(trap_exit, true),
-  {ok, Mem}  = open_segment(Filename, SegmSize, Opts),
+  {ok, Mem}  = open_queue(Filename, SegmSize, Opts),
   {ok, #state{mem=Mem, filename=Filename, segm_sz=SegmSize}}.
 
 handle_call({push, Term}, _From, #state{mem=Mem} = State) ->
@@ -97,16 +97,16 @@ handle_info({'EXIT', _Pid, Reason}, State) ->
   {stop, Reason, State}.
 
 terminate(_Reason, #state{mem=Mem}) ->
-  close_segment(Mem).
+  close_queue(Mem).
 
 %%------------------------------------------------------------------------------
 %% Raw segment access functions
 %%------------------------------------------------------------------------------
 
-open_segment(Filename, Size, Opts) when is_list(Filename), is_integer(Size), is_list(Opts) ->
+open_queue(Filename, Size, Opts) when is_list(Filename), is_integer(Size), is_list(Opts) ->
   ok = filelib:ensure_dir(filename:dirname(Filename)),
   case emmap:open(Filename, 0, Size, [create, read, write | Opts]) of
-    {ok, _Existing = true, Mem, SegmSize} ->
+    {ok, Mem, #{exist := true, size := SegmSize}} ->
       case header(Mem) of
         {_Head, Tail, Tail, SSize} when SSize =/= SegmSize ->
           %% Repair size
@@ -119,17 +119,17 @@ open_segment(Filename, Size, Opts) when is_list(Filename), is_integer(Size), is_
           ok = emmap:pwrite(Mem, 12, <<Tail:32/integer>>),
           {ok, Mem}
       end;
-    {ok, false, Mem, SegmSize} ->
+    {ok, Mem, #{exist := false, size := SegmSize}} ->
       ok = emmap:pwrite(Mem, 0, ?INIT_SEGM_HEADER_WITH_SIZE(SegmSize)),
       {ok, Mem};
     Error ->
       Error
   end.
 
-close_segment(Mem) ->
+close_queue(Mem) ->
   emmap:close(Mem).
 
-purge_segment(Mem) ->
+purge_queue(Mem) ->
   case is_empty_segment(Mem) of
     {true, 0} ->
       true;
@@ -188,6 +188,8 @@ push(Mem, Term) ->
         {ok, NewSegmSize} ->
           ok = emmap:pwrite(Mem, 0, <<NewSegmSize:32/integer>>),
           G(header(Mem));
+        {error, fixed_size} ->
+          {error, full};    % Queue is full and was given fixed_size option when opened
         {error, Reason} ->
           {error, Reason}
       end;
@@ -222,7 +224,7 @@ pop_and_purge(Mem) ->
 
 pop_internal(Mem) ->
   case header(Mem) of
-    {Head,  Tail, NextTail, _SegmSize} when Head < Tail ->
+    {Head,  Tail, NextTail, _SegmSize} when Head < Tail, Head >= ?HEADER_SZ, Tail >= ?HEADER_SZ ->
       {ok,   <<Sz:32/integer>>} = emmap:pread(Mem, Head, 4),
       BinSz  = Sz-8,
       {ok,   <<Bin:BinSz/binary, EndSz:32/integer>>} = emmap:pread(Mem, Head+4, BinSz+4),
@@ -230,8 +232,10 @@ pop_internal(Mem) ->
       NextHd = Head+Sz,
       ok     = emmap:pwrite(Mem, 4, <<NextHd:32/integer>>),
       {binary_to_term(Bin), (NextHd =:= Tail) and (NextHd =:= NextTail)};
-    {_Head, _Tail, _NextTail, _} ->
+    {Head, Tail, _NextTail, _} when Head >= ?HEADER_SZ, Tail >= ?HEADER_SZ ->
       nil;
+    {_Head, _Tail, _NextTail, _} = H ->
+      {error, {invalid_queue_header, H}};
     {error, Error} ->
       erlang:error(Error)
   end.
@@ -242,64 +246,59 @@ pop_internal(Mem) ->
 
 -ifdef(EUNIT).
 
-raw_queue_test() ->
-  Filename  = "/tmp/queue.bin",
-  {ok, Mem} = open_segment(Filename, 1024, []),
-  try
-    ?assert(filelib:is_regular(Filename)),
-    % Enqueue data
-    [?assertEqual(ok, push(Mem, I)) || I <- [a,b,c,1,2,3]],
-    ?assertEqual(6, length(Mem)),
-    % Dequeue data
-    ?assertMatch({a, false}, pop_internal(Mem)),
-    ?assertEqual(b,          pop(Mem)),
-    ?assertEqual(c,          pop(Mem)),
-    ?assertEqual(1,          pop(Mem)),
-    ?assertMatch({2, false}, pop_internal(Mem)),
-    ?assertMatch({3, true},  pop_internal(Mem)),
-    ?assertEqual(nil,        pop(Mem)),
-    ?assert(purge_segment(Mem)),
-    ?assert(is_empty(Mem))
-  after
-    file:delete(Filename)
-  end.
+%% Single-producer-single-consumer
+spsc_queue_test() ->
+  Filename  = "/tmp/queue1.bin",
+  {ok, Mem} = open_queue(Filename, 1024, [auto_unlink]),  %% Automatically delete file
+  ?assert(filelib:is_regular(Filename)),
+  % Enqueue data
+  [?assertEqual(ok, push(Mem, I)) || I <- [a,b,c,1,2,3]],
+
+  ?assertEqual({16,112,112,1024}, header(Mem)),
+  ?assertEqual(6, length(Mem)),
+
+  % Dequeue data
+  ?assertMatch({a, false}, pop_internal(Mem)),
+  ?assertEqual(b,          pop(Mem)),
+  ?assertEqual(c,          pop(Mem)),
+  ?assertEqual(1,          pop(Mem)),
+  ?assertMatch({2, false}, pop_internal(Mem)),
+  ?assertMatch({3, true},  pop_internal(Mem)),
+  ?assertEqual(nil,        pop(Mem)),
+  ?assert(purge_queue(Mem)),
+  ?assert(is_empty(Mem)).
 
 gen_server_queue_test() ->
-  Filename  = "/tmp/queue.bin",
-  {ok, Pid} = start_link(?MODULE, Filename, 512, []),
-  try
-    enqueue(Pid,  a),
-    ?assert(filelib:is_regular(Filename)),
-    enqueue(Pid,  b),
-    enqueue(Pid,  c),
+  Filename  = "/tmp/queue2.bin",
+  {ok, Pid} = start_link(?MODULE, Filename, 512, [auto_unlink]),
+  enqueue(Pid,  a),
+  ?assert(filelib:is_regular(Filename)),
+  enqueue(Pid,  b),
+  enqueue(Pid,  c),
 
-    ?assertEqual(a,   dequeue(Pid)),
-    ?assertEqual(b,   dequeue(Pid)),
-    ?assertEqual(c,   dequeue(Pid)),
-    ?assertEqual(nil, dequeue(Pid)),
+  ?assertEqual(a,   dequeue(Pid)),
+  ?assertEqual(b,   dequeue(Pid)),
+  ?assertEqual(c,   dequeue(Pid)),
+  ?assertEqual(nil, dequeue(Pid)),
 
-    Blob = list_to_binary(string:copies("x", 256)),
-    ?assertEqual(ok, enqueue(Pid, {1, Blob})),
-    ?assertEqual(#{size => 512, head => 16,next_tail => 292,tail => 292}, info(Pid)),
-    ?assertEqual(ok, enqueue(Pid, {2, Blob})),
-    ?assertEqual(#{size => 1024,head => 16,next_tail => 568,tail => 568}, info(Pid)),
-    ?assertEqual(ok, enqueue(Pid, {3, Blob})),
-    ?assertEqual(#{size => 1024,head => 16,next_tail => 844,tail => 844}, info(Pid)),
-    ?assertEqual(ok, enqueue(Pid, {4, Blob})),
-    ?assertEqual(#{size => 2048,head => 16,next_tail =>1120,tail =>1120}, info(Pid)),
+  Blob = list_to_binary(string:copies("x", 256)),
+  ?assertEqual(ok, enqueue(Pid, {1, Blob})),
+  ?assertEqual(#{size => 512, head => 16,next_tail => 292,tail => 292}, info(Pid)),
+  ?assertEqual(ok, enqueue(Pid, {2, Blob})),
+  ?assertEqual(#{size => 1024,head => 16,next_tail => 568,tail => 568}, info(Pid)),
+  ?assertEqual(ok, enqueue(Pid, {3, Blob})),
+  ?assertEqual(#{size => 1024,head => 16,next_tail => 844,tail => 844}, info(Pid)),
+  ?assertEqual(ok, enqueue(Pid, {4, Blob})),
+  ?assertEqual(#{size => 2048,head => 16,next_tail =>1120,tail =>1120}, info(Pid)),
 
-    ?assertEqual({1,Blob},   dequeue(Pid)),
-    ?assertEqual(#{size => 2048, head => 292,next_tail => 1120,tail => 1120}, info(Pid)),
-    ?assertEqual({2,Blob},   dequeue(Pid)),
-    ?assertEqual(#{size => 2048, head => 568,next_tail => 1120,tail => 1120}, info(Pid)),
-    ?assertEqual({3,Blob},   dequeue(Pid)),
-    ?assertEqual(#{size => 2048, head => 844,next_tail => 1120,tail => 1120}, info(Pid)),
-    ?assertEqual({4,Blob},   dequeue(Pid)),
-    ?assertEqual(#{size => 2048, head => 16,next_tail => 16,tail => 16}, info(Pid)),
-    ?assertEqual(nil, dequeue(Pid))
-
-  after
-    file:delete(Filename)
-  end.
+  ?assertEqual({1,Blob},   dequeue(Pid)),
+  ?assertEqual(#{size => 2048, head => 292,next_tail => 1120,tail => 1120}, info(Pid)),
+  ?assertEqual({2,Blob},   dequeue(Pid)),
+  ?assertEqual(#{size => 2048, head => 568,next_tail => 1120,tail => 1120}, info(Pid)),
+  ?assertEqual({3,Blob},   dequeue(Pid)),
+  ?assertEqual(#{size => 2048, head => 844,next_tail => 1120,tail => 1120}, info(Pid)),
+  ?assertEqual({4,Blob},   dequeue(Pid)),
+  ?assertEqual(#{size => 2048, head => 16,next_tail => 16,tail => 16}, info(Pid)),
+  ?assertEqual(nil, dequeue(Pid)).
 
 -endif.
