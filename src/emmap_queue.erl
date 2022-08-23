@@ -365,9 +365,17 @@ spsc_queue_test() ->
   ?assert(purge_queue(Mem)),
   ?assert(is_empty(Mem)).
 
+file_size()             -> file_size(element(2, os:type())).
+file_size(darwin)       -> 2048;
+file_size(_)            -> 512.
+
+check_size(Sz)          -> check_size(element(2,os:type()), Sz).
+check_size(darwin, _Sz) -> 2048;
+check_size(_,       Sz) -> Sz.
+
 gen_server_queue_test() ->
   Filename  = "/tmp/queue2.bin",
-  {ok, Pid} = start_link(?MODULE, Filename, 512, [auto_unlink]),
+  {ok, Pid} = start_link(?MODULE, Filename, file_size(), [auto_unlink]),
   enqueue(Pid,  a),
   ?assert(filelib:is_regular(Filename)),
   enqueue(Pid,  b),
@@ -382,11 +390,11 @@ gen_server_queue_test() ->
 
   Blob = list_to_binary(string:copies("x", 256)),
   ?assertEqual(ok, enqueue(Pid, {1, Blob})),
-  ?assertEqual(#{size => 512, head => 16,next_tail => 292,tail => 292}, info(Pid)),
+  ?assertEqual(#{size => check_size(512), head => 16,next_tail => 292,tail => 292}, info(Pid)),
   ?assertEqual(ok, enqueue(Pid, {2, Blob})),
-  ?assertEqual(#{size => 1024,head => 16,next_tail => 568,tail => 568}, info(Pid)),
+  ?assertEqual(#{size => check_size(1024),head => 16,next_tail => 568,tail => 568}, info(Pid)),
   ?assertEqual(ok, enqueue(Pid, {3, Blob})),
-  ?assertEqual(#{size => 1024,head => 16,next_tail => 844,tail => 844}, info(Pid)),
+  ?assertEqual(#{size => check_size(1024),head => 16,next_tail => 844,tail => 844}, info(Pid)),
   ?assertEqual(ok, enqueue(Pid, {4, Blob})),
   ?assertEqual(#{size => 2048,head => 16,next_tail =>1120,tail =>1120}, info(Pid)),
 

@@ -482,7 +482,7 @@ simple_test() ->
     file:delete("test.data").
 
 counter_test() ->
-    F  = open_counters("/dev/shm/temp.bin", 1),
+    F  = open_counters("/tmp/temp.bin", 1),
     {ok,N1} = inc_counter(F, 0, 1),
     {ok,N2} = inc_counter(F, 0, 1),
     {ok,N3} = set_counter(F, 0, 5),
@@ -492,7 +492,7 @@ counter_test() ->
     {ok,N7} = dec_counter(F, 0, 3),
     {ok,N8} = read_counter(F, 0),
     close_counters(F),
-    file:delete("/dev/shm/temp.bin"),
+    file:delete("/tmp/temp.bin"),
     ?assertEqual(0, N1),
     ?assertEqual(1, N2),
     ?assertEqual(2, N3),

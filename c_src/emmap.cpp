@@ -80,8 +80,9 @@ struct mhandle
     if (mem) {
       debug(dbg, "Unmapping memory %p of size %lu\r\n", mem, len);
       if (destruct || !direct) {
-        debug(dbg, "Releasing memory map %p of size %lu\r\n", mem, len);
         result = munmap(mem, len) == 0;
+        debug(dbg, "Releasing memory map %p of size %lu -> %s\r\n", mem, len,
+              result ? "ok" : strerror_compat(errno));
       } else if (direct) {
         // We must not unmap the memory that might be in use by some binaries
         // until the destructor is called.
@@ -545,15 +546,14 @@ static ERL_NIF_TERM emmap_close(ErlNifEnv* env, int argc, const ERL_NIF_TERM arg
   if (argc!=1 || !enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle))
     return enif_make_badarg(env);
 
-  int res;
   RW_LOCK;
-  res = handle->unmap(false);
+  bool res = handle->unmap(false);
   RW_UNLOCK;
 
   if (handle->auto_unlink)
-    res = unlink(handle->path);
+    res = unlink(handle->path) == 0;
 
-  return res == 0 ? ATOM_OK : make_error_tuple(env, errno);
+  return res ? ATOM_OK : make_error_tuple(env, errno);
 }
 
 static ERL_NIF_TERM emmap_pread(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
