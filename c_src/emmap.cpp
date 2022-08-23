@@ -171,11 +171,11 @@ static ERL_NIF_TERM ATOM_POPULATE;
 static ERL_NIF_TERM ATOM_PRIVATE;
 static ERL_NIF_TERM ATOM_READ;
 static ERL_NIF_TERM ATOM_SHARED;
-#ifndef __OSX__
+#ifndef __APPLE__
 static ERL_NIF_TERM ATOM_SHARED_VALIDATE;
 #endif
 static ERL_NIF_TERM ATOM_SIZE;
-#ifndef __OSX__
+#ifndef __APPLE__
 static ERL_NIF_TERM ATOM_SYNC;
 #endif
 static ERL_NIF_TERM ATOM_TRUE;
@@ -265,11 +265,11 @@ static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
   ATOM_PRIVATE          = enif_make_atom(env, "private");
   ATOM_READ             = enif_make_atom(env, "read");
   ATOM_SHARED           = enif_make_atom(env, "shared");
-#ifndef __OSX__
+#ifndef __APPLE__
   ATOM_SHARED_VALIDATE  = enif_make_atom(env, "shared_validate");
 #endif
   ATOM_SIZE             = enif_make_atom(env, "size");
-#ifndef __OSX__
+#ifndef __APPLE__
   ATOM_SYNC             = enif_make_atom(env, "sync");
 #endif
   ATOM_TRUE             = enif_make_atom(env, "true");
@@ -348,7 +348,7 @@ static bool decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flag
       f |= MAP_POPULATE;
   #endif
 #endif
-#ifndef __OSX__
+#ifndef __APPLE__
     } else if (enif_is_identical(head, ATOM_SHARED_VALIDATE)) {
       f |= MAP_SHARED_VALIDATE;
 #endif
@@ -356,7 +356,7 @@ static bool decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flag
       f |= MAP_SHARED;
     } else if (enif_is_identical(head, ATOM_ANON)) {
       f |= MAP_ANONYMOUS;
-#ifndef __OSX__
+#ifndef __APPLE__
     } else if (enif_is_identical(head, ATOM_SYNC)) {
       f |= MAP_SYNC;
 #endif
@@ -475,7 +475,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
     if (exists && len > 0 && fsize != long(len) && fsize > 0) {
       char buf[1280];
       snprintf(buf, sizeof(buf), "File %s has different size (%ld) than requested (%ld)",
-               path, fsize, len);
+               path, long(fsize), len);
       close(fd);
       return make_error_tuple(env, buf);
     }
@@ -612,7 +612,7 @@ static ERL_NIF_TERM emmap_resize(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
 
   if (handle->fixed_size)
     return make_error(env, ATOM_FIXED_SIZE);
-#ifdef __OSX__
+#ifdef __APPLE__
   return make_error(env, ATOM_FIXED_SIZE);
 #else
   if ((handle->prot & PROT_WRITE) == 0) {
