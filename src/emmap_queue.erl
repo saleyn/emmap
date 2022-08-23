@@ -376,10 +376,10 @@ check_size(_,       Sz) -> Sz.
 gen_server_queue_test() ->
   Filename  = "/tmp/queue2.bin",
   {ok, Pid} = start_link(?MODULE, Filename, file_size(), [auto_unlink]),
-  enqueue(Pid,  a),
+  ok = enqueue(Pid,  a),
   ?assert(filelib:is_regular(Filename)),
-  enqueue(Pid,  b),
-  enqueue(Pid,  c),
+  ok = enqueue(Pid,  b),
+  ok = enqueue(Pid,  c),
 
   ?assertEqual(a,   dequeue(Pid)),
   ?assertEqual(b,   inspect(Pid)),
@@ -406,6 +406,13 @@ gen_server_queue_test() ->
   ?assertEqual(#{size => 2048, head => 844,next_tail => 1120,tail => 1120}, info(Pid)),
   ?assertEqual({4,Blob},   dequeue(Pid)),
   ?assertEqual(#{size => 2048, head => 16,next_tail => 16,tail => 16}, info(Pid)),
-  ?assertEqual(nil, dequeue(Pid)).
+  ?assertEqual(nil, dequeue(Pid)),
+  
+  case os:type() of
+    {_, darwin} ->
+      ?assertEqual({error, full}, enqueue(Pid, string:copies("x", 4096)));
+    _ ->
+      ok
+  end.
 
 -endif.
