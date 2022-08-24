@@ -2,7 +2,7 @@
 
 -export([
     init/0,
-    open/2, open/4, close/1, resize/1, resize/2, sync/1,
+    open/2, open/4, close/1, resize/1, resize/2, flush/1,
     pread/3, pwrite/3, read/2, read_line/1, position/2,
     patomic_add/3,  patomic_sub/3, patomic_and/3, patomic_or/3, patomic_xor/3,
     patomic_xchg/3, patomic_cas/4,
@@ -218,8 +218,8 @@ resize_nif(_, _) ->
 %% non-blocking.  This call is not required as the OS will asynchronously flush the
 %% modified memory pages to disk lazily, but this call will trigger that process
 %% immediately.
--spec sync(File::mmap_file()) -> ok.
-sync(#file_descriptor{module=?MODULE, data=Mem}) -> sync_nif(Mem).
+-spec flush(File::mmap_file()) -> ok.
+flush(#file_descriptor{module=?MODULE, data=Mem}) -> sync_nif(Mem).
 sync_nif(_) ->
     erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 

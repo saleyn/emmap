@@ -170,7 +170,7 @@ close(Mem) ->
 %% @doc Asynchronously flush the modified memory used by the queue to disk.
 %% See notes of `emmap:sync/1'.  This call is optional.
 flush(Mem) ->
-  emmap:sync(Mem).
+  emmap:flush(Mem).
 
 %% @doc Purge queue.  It is a constant time operation.
 purge(Mem) ->
@@ -438,7 +438,8 @@ spsc_queue_test() ->
   
   ?assertEqual([], [R || R <- [push(Mem, I) || I <- [a,b,1,2]], R /= ok]),
   ?assertEqual([a,b,1,2], lists:reverse(pop(Mem, [], fun(I,S) -> {cont, [I | S]} end))),
-  ?assert(is_empty(Mem)).
+  ?assert(is_empty(Mem)),
+  ?assertEqual(ok, flush(Mem)).
 
 file_size()             -> file_size(element(2, os:type())).
 file_size(darwin)       -> 2048;
