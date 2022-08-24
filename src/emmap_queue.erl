@@ -13,8 +13,9 @@
 %%% Created: 2021-12-10
 %%%-----------------------------------------------------------------------------
 -module(emmap_queue).
--export([open/3, close/1]).
--export([purge_queue/1, is_empty/1, length/1, push/2, pop/1, peek/1, try_pop/2,
+-export([open/3, close/1, flush/1]).
+-export([purge/1, is_empty/1, length/1, push/2,
+         pop/1, pop/3, peek/1, peek/3, try_pop/2,
          pop_and_purge/1, try_pop_and_purge/2]).
 
 -export([start_link/4, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
@@ -146,13 +147,13 @@ open(Filename, Size, Opts) when is_list(Filename), is_integer(Size), is_list(Opt
       case header(Mem) of
         {_Head, Tail, Tail, SSize} when SSize =/= SegmSize ->
           %% Repair size
-          ok = emmap:pwrite(Mem, 0, <<SegmSize:32/integer>>),
+          update_size(Mem, SegmSize),
           {ok, Mem};
         {_Head, Tail, Tail, _SegmSize} ->
           {ok, Mem};
         {_Head, Tail, _NextTail, _SegmSize} ->
           % Need to repair last uncommitted tail
-          ok = emmap:pwrite(Mem, 12, <<Tail:32/integer>>),
+          reserve_tail(Mem, Tail),
           {ok, Mem}
       end;
     {ok, Mem, #{exist := false, size := SegmSize}} ->
@@ -166,13 +167,18 @@ open(Filename, Size, Opts) when is_list(Filename), is_integer(Size), is_list(Opt
 close(Mem) ->
   emmap:close(Mem).
 
+%% @doc Asynchronously flush the modified memory used by the queue to disk.
+%% See notes of `emmap:sync/1'.  This call is optional.
+flush(Mem) ->
+  emmap:sync(Mem).
+
 %% @doc Purge queue.  It is a constant time operation.
-purge_queue(Mem) ->
+purge(Mem) ->
   case is_empty_queue(Mem) of
     {true, 0} ->
       true;
     {true, _} ->
-      ok = emmap:pwrite(Mem, 4, ?INIT_SEGM_HEADER),
+      init_header(Mem),
       true;
     false ->
       false
@@ -229,7 +235,7 @@ push(Mem, Term) ->
     G({_Head,_Tail, NextTail, SegmSize}) when NextTail+Sz > SegmSize ->
       case emmap:resize(Mem) of
         {ok, NewSegmSize} ->
-          ok = emmap:pwrite(Mem, 0, <<NewSegmSize:32/integer>>),
+          update_size(Mem, NewSegmSize),
           G(header(Mem));
         {error, fixed_size} ->
           {error, full};    % Queue is full and was given fixed_size option when opened
@@ -239,9 +245,9 @@ push(Mem, Term) ->
     G({_Head, Tail, NextTail,_SegmSize}) ->
       NewTail = NextTail+Sz,
       TailBin = <<NewTail:32/integer>>,
-      ok = emmap:pwrite(Mem, 12,   TailBin), % Increment next tail offset
+      reserve_tail(Mem, TailBin),            % Reserve the next tail offset
       ok = emmap:pwrite(Mem, Tail, Msg),     % Write message
-      ok = emmap:pwrite(Mem, 8,    TailBin); % Commit tail offset
+      commit_tail(Mem, TailBin);             % Commit tail offset
     G(Error) ->
        Error
   end)(Arg).
@@ -274,7 +280,7 @@ try_pop(Mem, Fun) when is_function(Fun, 1) ->
 try_pop_and_purge(Mem, Fun) when is_function(Fun, 1) ->
   case pop_internal(Mem, Fun) of
     {Res, true} ->
-      ok = emmap:pwrite(Mem, 4, ?INIT_SEGM_HEADER),
+      init_header(Mem),
       Res;
     {Res, false} ->
       Res;
@@ -297,7 +303,7 @@ peek(Mem) ->
 pop_and_purge(Mem) ->
   case pop_internal(Mem, true) of
     {Msg, true} ->
-      ok = emmap:pwrite(Mem, 4, ?INIT_SEGM_HEADER),
+      init_header(Mem),
       Msg;
     {Msg, false} ->
       Msg;
@@ -305,25 +311,63 @@ pop_and_purge(Mem) ->
       nil
   end.
 
+%% @doc Inspect all messages in the queue by passing it to a custom lambda function.
+%% The `Fun' takes a message and state and returns a `{cont, State}' to continue or
+%% `{halt, State}' to abort.
+peek(Mem, Init, Fun) when is_function(Fun, 2) ->
+  F = fun
+    G(H, T, State) when H < T ->
+      {Msg, NextH} = read_internal(Mem, H),
+      case Fun(Msg, State) of
+        {cont, State1} ->
+          G(NextH, T, State1);
+        {halt, State1} ->
+          State1
+      end;
+    G(_, _, State) ->
+      State
+  end,
+  {Head, Tail, _, _} = header(Mem),
+  F(Head, Tail, Init).
+
+%% @doc Pop messages from the queue by passing them to a custom lambda function.
+%% The `Fun' takes a message and state and returns a `{cont, State}' to continue or
+%% `{halt, State}' to abort.
+pop(Mem, Init, Fun) when is_function(Fun, 2) ->
+  F = fun
+    G(H, T, State) when H < T ->
+      {Msg, NextH} = read_internal(Mem, H),
+      case Fun(Msg, State) of
+        {cont, State1} ->
+          update_head(Mem, NextH),
+          G(NextH, T, State1);
+        {halt, State1} ->
+          State1
+      end;
+    G(?HEADER_SZ, _, State) ->
+      State;
+    G(_, _, State) ->
+      % Purge the empty queue
+      init_header(Mem),
+      State
+  end,
+  {Head, Tail, _, _} = header(Mem),
+  F(Head, Tail, Init).
+
 pop_internal(Mem, Pop) ->
   case header(Mem) of
     {Head,  Tail, NextTail, _SegmSize} when Head < Tail, Head >= ?HEADER_SZ, Tail >= ?HEADER_SZ ->
-      {ok,   <<Sz:32/integer>>} = emmap:pread(Mem, Head, 4),
-      BinSz  = Sz-8,
-      {ok,   <<Bin:BinSz/binary, EndSz:32/integer>>} = emmap:pread(Mem, Head+4, BinSz+4),
-      EndSz /= Sz   andalso erlang:error({message_size_mismatch, {Sz, EndSz}, Head}),
-      NextHd = Head+Sz,
-      Msg    = binary_to_term(Bin),
-      IsEnd  = (NextHd =:= Tail) andalso (NextHd =:= NextTail),
+      {Msg, NextHead} = read_internal(Mem, Head),
+      IsEnd  = (NextHead =:= Tail) andalso (NextHead =:= NextTail),
       case Pop of
         true ->
-          ok = emmap:pwrite(Mem, 4, <<NextHd:32/integer>>),
+          update_head(Mem, NextHead),
           {Msg, IsEnd};
         false ->
           {Msg, IsEnd};
         _ when is_function(Pop, 1) ->
           Res = Pop(Msg),
-          ok = emmap:pwrite(Mem, 4, <<NextHd:32/integer>>),
+          update_head(Mem, NextHead),
           {Res, IsEnd}
       end;
     {Head, Tail, _NextTail, _} when Head >= ?HEADER_SZ, Tail >= ?HEADER_SZ ->
@@ -333,6 +377,31 @@ pop_internal(Mem, Pop) ->
     {error, Error} ->
       erlang:error(Error)
   end.
+
+read_internal(Mem, Head) ->
+  % Read the size of the next message
+  {ok,   <<Sz:32/integer>>} = emmap:pread(Mem, Head, 4),
+  BinSz  = Sz-8,  % The size read is inclusive of the 2 sizes written before/after the msg
+  {ok,   <<Bin:BinSz/binary, EndSz:32/integer>>} = emmap:pread(Mem, Head+4, BinSz+4),
+  EndSz /= Sz   andalso erlang:error({message_size_mismatch, {Sz, EndSz}, Head}),
+  {binary_to_term(Bin), Head+Sz}.
+
+update_head(Mem, NextHead) ->
+  ok = emmap:pwrite(Mem, 4, <<NextHead:32/integer>>).
+
+update_size(Mem, MemSize) ->
+  ok = emmap:pwrite(Mem, 0, <<MemSize:32/integer>>).
+
+reserve_tail(Mem, Tail) when is_integer(Tail) ->
+  ok = emmap:pwrite(Mem, 12, <<Tail:32/integer>>);
+reserve_tail(Mem, Tail) when byte_size(Tail) == 4 ->
+  ok = emmap:pwrite(Mem, 12, Tail).
+
+commit_tail(Mem, Tail) when byte_size(Tail) == 4 ->
+  ok = emmap:pwrite(Mem, 8, Tail).
+
+init_header(Mem) ->
+  ok = emmap:pwrite(Mem, 4, ?INIT_SEGM_HEADER).
 
 %%------------------------------------------------------------------------------
 %% Multi-segment gen_server support
@@ -346,7 +415,9 @@ spsc_queue_test() ->
   {ok, Mem} = open(Filename, 1024, [auto_unlink]),  %% Automatically delete file
   ?assert(filelib:is_regular(Filename)),
   % Enqueue data
-  [?assertEqual(ok, push(Mem, I)) || I <- [a,b,c,1,2,3]],
+  ?assertEqual([], [R || R <- [push(Mem, I) || I <- [a,b,c,1,2,3]], R /= ok]),
+
+  ?assertEqual([a,b,c,1,2,3], lists:reverse(peek(Mem, [], fun(I,S) -> {cont, [I | S]} end))),
 
   ?assertEqual({16,112,112,1024}, header(Mem)),
   ?assertEqual(6, length(Mem)),
@@ -362,7 +433,11 @@ spsc_queue_test() ->
   ?assertMatch({3, true},  pop_internal(Mem, true)),
   ?assertEqual(nil,        pop(Mem)),
   ?assertEqual({112,112,112,1024}, header(Mem)),
-  ?assert(purge_queue(Mem)),
+  ?assert(purge(Mem)),
+  ?assert(is_empty(Mem)),
+  
+  ?assertEqual([], [R || R <- [push(Mem, I) || I <- [a,b,1,2]], R /= ok]),
+  ?assertEqual([a,b,1,2], lists:reverse(pop(Mem, [], fun(I,S) -> {cont, [I | S]} end))),
   ?assert(is_empty(Mem)).
 
 file_size()             -> file_size(element(2, os:type())).

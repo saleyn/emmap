@@ -186,6 +186,7 @@ static ERL_NIF_TERM ATOM_WRITE;
 
 static ERL_NIF_TERM emmap_open             (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM emmap_resize           (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_sync             (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM emmap_read             (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM emmap_read_line        (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM emmap_close            (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
@@ -208,6 +209,7 @@ extern "C" {
   {
     {"open_nif",              4, emmap_open},
     {"close_nif",             1, emmap_close},
+    {"sync_nif",              1, emmap_sync},
     {"resize_nif",            2, emmap_resize},
     {"pread_nif",             3, emmap_pread},
     {"pwrite_nif",            3, emmap_pwrite},
@@ -554,6 +556,22 @@ static ERL_NIF_TERM emmap_close(ErlNifEnv* env, int argc, const ERL_NIF_TERM arg
     res = unlink(handle->path) == 0;
 
   return res ? ATOM_OK : make_error_tuple(env, errno);
+}
+
+static ERL_NIF_TERM emmap_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  mhandle* handle;
+  if (argc!=1 || !enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle))
+    return enif_make_badarg(env);
+
+  if (!handle->mem)
+    return ATOM_OK;
+
+  RW_LOCK;
+  auto res = msync(handle->mem, handle->len, MS_ASYNC);
+  RW_UNLOCK;
+
+  return res==0 ? ATOM_OK : make_error_tuple(env, strerror_compat(errno));
 }
 
 static ERL_NIF_TERM emmap_pread(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
