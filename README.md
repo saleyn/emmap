@@ -9,6 +9,12 @@ This Erlang library provides a wrapper that allows you to memory map files into 
 * [Kresten Krab Thorup](https://github.com/krestenkrab/emmap)
 * [Serge Aleynikov](https://github.com/saleyn/emmap)
 
+## Supported Platforms
+
+Linux, MacOS
+
+NOTE: On MacOS `emmap:resize/2` is not supported, it will return `{error, fixed_size}`.
+
 ## Basic Usage
 
 The basic usage is
