@@ -29,9 +29,13 @@
   | debug
   | direct
   | fixed
+  | hugetlb
+  | huge_2mb
+  | huge_1gb
   | lock
   | nocache
   | nolock
+  | nonblock
   | noreserve
   | populate
   | private
@@ -77,6 +81,10 @@
 %%        first to be reclaimed. NOTE: this option is only valid for Mac OS.</dd>
 %%   <dt>nolock</dt>
 %%    <dd>Don't use a semaphore (read/write lock) to control state changes internally in the NIF library</dd>
+%%   <dt>nonblock</dt>
+%%    <dd>Don't perform read-ahead: create page tables entries only for pages that are
+%%        already present in RAM. Since Linux 2.6.23, this flag causes `populate' to
+%%        do nothing.</dd>
 %%   <dt>noreserve</dt>
 %%    <dd>Do not reserve swap space for this mapping.  When swap space is reserved, one has
 %%        the guarantee that it is possible to modify the mapping.</dd>
@@ -87,6 +95,12 @@
 %%    <dd>Create a private copy-on-write mapping.  Updates to the mapping are not visible to
 %%        other processes mapping the same file, and are not carried through to the underlying
 %%        file.</dd>
+%%   <dt>hugetlb</dt>
+%%    <dd>Allocate the mapping using "huge" pages.</dd>
+%%   <dt>huge_2mb</dt>
+%%    <dd>Used in conjunction with `hugetlb' to select alternative hugetlb page size of 2MB</dd>
+%%   <dt>huge_1gb</dt>
+%%    <dd>Used in conjunction with `hugetlb' to select alternative hugetlb page size of 1GB</dd>
 %%   <dt>read</dt>
 %%    <dd>Open for reading (this is default).</dd>
 %%   <dt>shared</dt>

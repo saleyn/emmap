@@ -161,10 +161,14 @@ static ERL_NIF_TERM ATOM_FALSE;
 static ERL_NIF_TERM ATOM_FILE;
 static ERL_NIF_TERM ATOM_FIXED;
 static ERL_NIF_TERM ATOM_FIXED_SIZE;
+static ERL_NIF_TERM ATOM_HUGETLB;
+static ERL_NIF_TERM ATOM_HUGE_2MB;
+static ERL_NIF_TERM ATOM_HUGE_1GB;
 static ERL_NIF_TERM ATOM_LOCK;
 static ERL_NIF_TERM ATOM_MAX_INC_SIZE;
 static ERL_NIF_TERM ATOM_NOCACHE;
 static ERL_NIF_TERM ATOM_NOLOCK;
+static ERL_NIF_TERM ATOM_NONBLOCK;
 static ERL_NIF_TERM ATOM_NONE;
 static ERL_NIF_TERM ATOM_NORESERVE;
 static ERL_NIF_TERM ATOM_OK;
@@ -257,10 +261,14 @@ static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
   ATOM_FILE             = enif_make_atom(env, "file");
   ATOM_FIXED            = enif_make_atom(env, "fixed");
   ATOM_FIXED_SIZE       = enif_make_atom(env, "fixed_size");
+  ATOM_HUGETLB          = enif_make_atom(env, "hugetlb");
+  ATOM_HUGE_2MB         = enif_make_atom(env, "huge_2mb");
+  ATOM_HUGE_1GB         = enif_make_atom(env, "huge_1gb");
   ATOM_LOCK             = enif_make_atom(env, "lock");
   ATOM_MAX_INC_SIZE     = enif_make_atom(env, "max_inc_size");
   ATOM_NOCACHE          = enif_make_atom(env, "nocache");
   ATOM_NOLOCK           = enif_make_atom(env, "nolock");
+  ATOM_NONBLOCK         = enif_make_atom(env, "nonblock");
   ATOM_NONE             = enif_make_atom(env, "none");
   ATOM_NORESERVE        = enif_make_atom(env, "noreserve");
   ATOM_OK               = enif_make_atom(env, "ok");
@@ -345,11 +353,25 @@ static bool decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flag
       *open_flags |= O_RDWR;
     } else if (enif_is_identical(head, ATOM_PRIVATE)) {
       f |= MAP_PRIVATE;
-#if ERL_NIF_MINOR_VERSION > 4
-  #ifdef MAP_POPULATE
+#ifdef MAP_HUGETLB
+    } else if (enif_is_identical(head, ATOM_HUGETLB)) {
+      f |= MAP_HUGETLB;
+#endif
+#ifdef MAP_HUGE_2MB
+    } else if (enif_is_identical(head, ATOM_HUGE_2MB)) {
+      f |= MAP_HUGE_2MB;
+#endif
+#ifdef MAP_HUGE_1GB
+    } else if (enif_is_identical(head, ATOM_HUGE_1GB)) {
+      f |= MAP_HUGE_1GB;
+#endif
+#ifdef MAP_POPULATE
     } else if (enif_is_identical(head, ATOM_POPULATE)) {
       f |= MAP_POPULATE;
-  #endif
+#endif
+#ifdef MAP_NONBLOCK
+    } else if (enif_is_identical(head, ATOM_NONBLOCK)) {
+      f |= MAP_NONBLOCK;
 #endif
 #ifndef __APPLE__
     } else if (enif_is_identical(head, ATOM_SHARED_VALIDATE)) {
