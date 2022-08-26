@@ -15,7 +15,7 @@
 -module(emmap_queue).
 -export([open/3, close/1, flush/1]).
 -export([purge/1, is_empty/1, length/1, push/2,
-         pop/1, pop/3, peek/1, peek/3, try_pop/2,
+         pop/1, pop/3, peek_front/1, peek_back/1, peek/3, try_pop/2,
          pop_and_purge/1, try_pop_and_purge/2]).
 
 -export([start_link/4, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
@@ -108,7 +108,7 @@ handle_call(pop, _From, #state{mem=Mem} = State) ->
   {reply, Msg, State};
 
 handle_call(peek, _From, #state{mem=Mem} = State) ->
-  Msg = peek(Mem),
+  Msg = peek_front(Mem),
   {reply, Msg, State};
 
 handle_call({try_pop, Fun}, _From, #state{mem=Mem} = State) ->
@@ -254,7 +254,7 @@ push(Mem, Term) ->
 
 %% @doc Pop a term from the queue. This function has a constant-time complexity.
 pop(Mem) ->
-  case pop_internal(Mem, true) of
+  case read_head(Mem, true) of
     {Msg, _IsEnd} ->
       Msg;
     nil ->
@@ -266,7 +266,7 @@ pop(Mem) ->
 %% leave the queue unmodified. This function has a constant-time complexity. It returns
 %% the result of evaluating `Fun'.
 try_pop(Mem, Fun) when is_function(Fun, 1) ->
-  case pop_internal(Mem, Fun) of
+  case read_head(Mem, Fun) of
     {Res, _IsEnd} ->
       Res;
     nil ->
@@ -278,7 +278,7 @@ try_pop(Mem, Fun) when is_function(Fun, 1) ->
 %% leave the queue unmodified. This function has a constant-time complexity. It returns
 %% the result of evaluating `Fun'.
 try_pop_and_purge(Mem, Fun) when is_function(Fun, 1) ->
-  case pop_internal(Mem, Fun) of
+  case read_head(Mem, Fun) of
     {Res, true} ->
       init_header(Mem),
       Res;
@@ -288,20 +288,43 @@ try_pop_and_purge(Mem, Fun) when is_function(Fun, 1) ->
       nil
   end.
 
-%% @doc Peek the next term from the queue without popping it.
+%% @doc Peek the next awaiting term from the head of the FIFO queue without popping it.
 %% This function has a constant-time complexity.
-peek(Mem) ->
-  case pop_internal(Mem, false) of
+peek_front(Mem) ->
+  case read_head(Mem, false) of
     {Msg, _IsEnd} ->
       Msg;
     nil ->
       nil
   end.
 
+%% @doc Peek the last written term at the back of the FIFO queue without removing it.
+%% This function has a constant-time complexity.
+peek_back(Mem) ->
+  case header(Mem) of
+    {Head, Tail, _NextTail, _Size} when Head < Tail+8, Head >= ?HEADER_SZ, Tail >= ?HEADER_SZ ->
+      % Read the size of the next message
+      {ok, <<Sz:32/integer>>} = emmap:pread(Mem, Tail-4, 4),
+      case Tail-Sz of
+        I when I >= Head ->
+          BinSz  = Sz-8,  % The size read is inclusive of the 2 sizes written before/after the msg
+          case emmap:pread(Mem, I, Sz-4) of
+            {ok, <<Sz:32/integer, Bin:BinSz/binary>>} ->
+              binary_to_term(Bin);
+            {error, Why} ->
+              erlang:error({invalid_msg_header, Why})
+          end;
+        _ ->
+          nil
+      end;
+    _ ->
+      nil
+  end.
+ 
 %% @doc Pop a term from the queue and reclaim queue's memory if the queue is empty.
 %% This function has a constant-time complexity.
 pop_and_purge(Mem) ->
-  case pop_internal(Mem, true) of
+  case read_head(Mem, true) of
     {Msg, true} ->
       init_header(Mem),
       Msg;
@@ -317,7 +340,7 @@ pop_and_purge(Mem) ->
 peek(Mem, Init, Fun) when is_function(Fun, 2) ->
   F = fun
     G(H, T, State) when H < T ->
-      {Msg, NextH} = read_internal(Mem, H),
+      {Msg, NextH} = read_first(Mem, H),
       case Fun(Msg, State) of
         {cont, State1} ->
           G(NextH, T, State1);
@@ -336,7 +359,7 @@ peek(Mem, Init, Fun) when is_function(Fun, 2) ->
 pop(Mem, Init, Fun) when is_function(Fun, 2) ->
   F = fun
     G(H, T, State) when H < T ->
-      {Msg, NextH} = read_internal(Mem, H),
+      {Msg, NextH} = read_first(Mem, H),
       case Fun(Msg, State) of
         {cont, State1} ->
           update_head(Mem, NextH),
@@ -354,10 +377,10 @@ pop(Mem, Init, Fun) when is_function(Fun, 2) ->
   {Head, Tail, _, _} = header(Mem),
   F(Head, Tail, Init).
 
-pop_internal(Mem, Pop) ->
+read_head(Mem, Pop) ->
   case header(Mem) of
     {Head,  Tail, NextTail, _SegmSize} when Head < Tail, Head >= ?HEADER_SZ, Tail >= ?HEADER_SZ ->
-      {Msg, NextHead} = read_internal(Mem, Head),
+      {Msg, NextHead} = read_first(Mem, Head),
       IsEnd  = (NextHead =:= Tail) andalso (NextHead =:= NextTail),
       case Pop of
         true ->
@@ -378,14 +401,14 @@ pop_internal(Mem, Pop) ->
       erlang:error(Error)
   end.
 
-read_internal(Mem, Head) ->
+read_first(Mem, Head) ->
   % Read the size of the next message
   {ok,   <<Sz:32/integer>>} = emmap:pread(Mem, Head, 4),
   BinSz  = Sz-8,  % The size read is inclusive of the 2 sizes written before/after the msg
   {ok,   <<Bin:BinSz/binary, EndSz:32/integer>>} = emmap:pread(Mem, Head+4, BinSz+4),
   EndSz /= Sz   andalso erlang:error({message_size_mismatch, {Sz, EndSz}, Head}),
   {binary_to_term(Bin), Head+Sz}.
-
+ 
 update_head(Mem, NextHead) ->
   ok = emmap:pwrite(Mem, 4, <<NextHead:32/integer>>).
 
@@ -414,8 +437,18 @@ spsc_queue_test() ->
   Filename  = "/tmp/queue1.bin",
   {ok, Mem} = open(Filename, 1024, [auto_unlink]),  %% Automatically delete file
   ?assert(filelib:is_regular(Filename)),
+  ?assertEqual(nil, peek_front(Mem)),
+  ?assertEqual(nil, peek_back(Mem)),
   % Enqueue data
-  ?assertEqual([], [R || R <- [push(Mem, I) || I <- [a,b,c,1,2,3]], R /= ok]),
+  ?assertEqual(ok,  push(Mem, a)),
+  ?assertEqual(a,   peek_front(Mem)),
+  ?assertEqual(a,   peek_back(Mem)),
+
+  ?assertEqual(ok,  push(Mem, b)),
+  ?assertEqual(a,   peek_front(Mem)),
+  ?assertEqual(b,   peek_back(Mem)),
+
+  ?assertEqual([], [R || R <- [push(Mem, I) || I <- [c,1,2,3]], R /= ok]),
 
   ?assertEqual([a,b,c,1,2,3], lists:reverse(peek(Mem, [], fun(I,S) -> {cont, [I | S]} end))),
 
@@ -423,14 +456,14 @@ spsc_queue_test() ->
   ?assertEqual(6, length(Mem)),
 
   % Dequeue data
-  ?assertMatch({a, false}, pop_internal(Mem, true)),
+  ?assertMatch({a, false}, read_head(Mem, true)),
   ?assertEqual(b,          pop(Mem)),
   ?assertEqual(c,          pop(Mem)),
   ?assertEqual(1,          pop(Mem)),
-  ?assertMatch(2,          peek(Mem)),
+  ?assertMatch(2,          peek_front(Mem)),
   ?assertMatch(2,          try_pop(Mem, fun(2) -> 2 end)),
   ?assertError(failed,     try_pop(Mem, fun(3) -> erlang:error(failed) end)),
-  ?assertMatch({3, true},  pop_internal(Mem, true)),
+  ?assertMatch({3, true},  read_head(Mem, true)),
   ?assertEqual(nil,        pop(Mem)),
   ?assertEqual({112,112,112,1024}, header(Mem)),
   ?assert(purge(Mem)),
