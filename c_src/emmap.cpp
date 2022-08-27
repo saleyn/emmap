@@ -78,12 +78,11 @@ struct mhandle
     auto result = true;
 
     if (mem) {
-      debug(dbg, "Unmapping memory %p of size %lu\r\n", mem, len);
       if (destruct || !direct) {
         result = munmap(mem, len) == 0;
         debug(dbg, "Releasing memory map %p of size %lu -> %s\r\n", mem, len,
               result ? "ok" : strerror_compat(errno));
-      } else if (direct) {
+      } else {
         // We must not unmap the memory that might be in use by some binaries
         // until the destructor is called.
         debug(dbg, "Preserving memory map %p of size %lu\r\n", mem, len);
@@ -93,9 +92,10 @@ struct mhandle
       mem = nullptr;
     }
 
-    if (auto_unlink) {
+    if (auto_unlink && path[0] != '\0') {
       debug(dbg, "Removing memory mapped file %s\r\n", path);
       unlink(path);
+      path[0] = '\0';
     }
 
     return result;
@@ -561,6 +561,8 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
   if (!enif_make_map_from_arrays(env, keys, vals, 2, &map))
     return make_error_tuple(env, ATOM_CANNOT_CREATE_MAP);
 
+  debug(handle, "Created memory map %p of size %lu (%s)\r\n", res, size, path);
+
   return enif_make_tuple3(env, ATOM_OK, resource, map);
 }
 
@@ -573,9 +575,6 @@ static ERL_NIF_TERM emmap_close(ErlNifEnv* env, int argc, const ERL_NIF_TERM arg
   RW_LOCK;
   bool res = handle->unmap(false);
   RW_UNLOCK;
-
-  if (handle->auto_unlink)
-    res = unlink(handle->path) == 0;
 
   return res ? ATOM_OK : make_error_tuple(env, errno);
 }

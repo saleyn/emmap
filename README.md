@@ -2,7 +2,12 @@
 
 [![build](https://github.com/saleyn/emmap/actions/workflows/erlang.yml/badge.svg)](https://github.com/saleyn/emmap/actions/workflows/erlang.yml)
 
-This Erlang library provides a wrapper that allows you to memory map files into the Erlang memory space.  
+This Erlang library implements an ability to use memory map files in the memory of the
+Erlang virtual machine.  It offers three sets of functions to implement:
+
+1. Generic read/write access to memory mapped files.
+2. Persistent atomic integer counters supporting basic arithmetic and logical operators.
+3. Persistent FIFO queue.
 
 ## Authors
 
@@ -35,6 +40,10 @@ interchangeably:
 - `{ok, Pos} = file:position(Mem, Where)` see file:position/2 documentation.
 - `ok = file:close(Mem)`
 
+All read/write functions invoke NIFs that don't call any IO functions but rather access memory
+via calls to `memcpy(2)`, and persistence is achieved by relying on the OS implementation of
+saving dirty memory pages to files.
+
 A memory map can be closed either by calling `emmap:close/1` or `file:close/1`. When using
 the `direct` option, and `emmap:close/1` is called, the memory map is not immediately closed,
 but will get automatically closed when all binaries that reference this memory map are garbage
@@ -57,8 +66,9 @@ This approach allows to implement persistent atomic counters that survive node r
 
 The `emmap` application allows a user to maintain atomic persistent counters.  This could be
 useful for continuous numbering of some events in the system which could be efficiently shared
-among processes in a thread-safe way and at the same time being persistent. This is a very
-light-weight approach compared to using `mnesia` or other form of persistent storage.
+among Erlang or OS processes in a thread-safe way and at the same time being persistent.
+This is a very light-weight approach compared to using `mnesia` or other form of persistent
+storage.
 
 Here is an example:
 
@@ -112,7 +122,57 @@ that such binaries are referring directly to the mmap'ed memory.
 When passing `auto_unlink` option to `emmap:open/4`, the memory mapped file will be
 automatically deleted when it is closed.
 
-## Persistent FIFO used as a container or guarded by a process.
+## Shared memory without using mutable binaries
+
+This example preserves the immutability of binaries but allows `emmap` to have visibility
+of memory changes between Erlang processes and also between OS processes.
+
+```
+$ erl -pa _build/default/lib/emmap/ebin
+eshell#1> {ok, F, _} = emmap:open("/tmp/q.bin", 0, 128, [auto_unlink, shared, create, read,
+  write]).
+
+$ erl -pa _build/default/lib/emmap/ebin
+eshell#2> {ok, F, _} = emmap:open("/tmp/q.bin", 0, 128, [auto_unlink, shared, create, read,
+  write]).
+
+eshell#1> emmap:pwrite(F, 0, <<"abcdefg\n">>).
+
+eshell#2> emmap:pread(F, 0, 8). # Changes in eshell#1 are visible in eshell#2
+{ok, <<"abcdefg\n">>}
+
+$ head -1 /tmp/q.bin            # They are also visible in another OS process reading from file
+abcdefg
+```
+
+Here it is without the `shared` option:
+```
+$ erl -pa _build/default/lib/emmap/ebin
+eshell#1> emmap:close(F).
+eshell#1> f(F), {ok, F, _} = emmap:open("/tmp/q.bin", 0, 128, [auto_unlink, create, read,
+  write]).
+
+^G
+--> s        # Start a new shell process inside the same Erlang VM
+--> c 2      # Connect to the new shell
+eshell#2> f(F), {ok, F, _} = emmap:open("/tmp/q.bin", 0, 128, [auto_unlink, create, read,
+  write]).
+
+^G
+--> c 1      # Switch back to the 1st shell
+eshell#1> emmap:pwrite(F, 0, <<"1234567\n">>).
+
+^G
+--> c 2      # Switch to the 2st shell
+
+eshell#2> emmap:pread(F, 0, 8).
+{ok,<<0,0,0,0,0,0,0,0>>}    # changes from shell1 are invisible in the shell2 Erlang process
+
+# Run this in another terminal
+$ head -1 /tmp/q.bin        # returns no data because changes in shell1 are invisible
+```
+
+## Persistent FIFO used as a container or guarded by a gen_server process.
 
 The `emmap_queue` module implements a persistent FIFO queue based on a memory-mapped file.
 This means that in-memory operations of enqueuing items are automatically persisted on disk.

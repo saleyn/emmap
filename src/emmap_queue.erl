@@ -15,7 +15,7 @@
 -module(emmap_queue).
 -export([open/3, close/1, flush/1]).
 -export([purge/1, is_empty/1, length/1, push/2,
-         pop/1, pop/3, peek_front/1, peek_back/1, peek/3, try_pop/2,
+         pop/1, pop/3, peek_front/1, peek_back/1, peek/3, rpeek/3, try_pop/2,
          pop_and_purge/1, try_pop_and_purge/2]).
 
 -export([start_link/4, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
@@ -119,12 +119,8 @@ handle_call({try_pop, Fun}, _From, #state{mem=Mem} = State) ->
   end;
 
 handle_call(info, _From, #state{mem=Mem} = State) ->
-  case header(Mem) of
-    {Head, Tail, NextTail, SegmSize} ->
-      {reply, #{head => Head, tail => Tail, next_tail => NextTail, size => SegmSize}, State};
-    Error ->
-      {reply, Error, State}
-  end.
+  {Head, Tail, NextTail, SegmSize} = header(Mem),
+  {reply, #{head => Head, tail => Tail, next_tail => NextTail, size => SegmSize}, State}.
 
 handle_cast(Msg, State) ->
   {stop, {cast_not_implemented, Msg}, State}.
@@ -186,10 +182,13 @@ purge(Mem) ->
 
 header(Mem) ->
   case emmap:pread(Mem, 0, 16) of
-    {ok, <<SegmSize:32/integer, Head:32/integer, Tail:32/integer, NextTail:32/integer>>} ->
-      {Head, Tail, NextTail, SegmSize};
-    Error ->
-      Error
+    {ok, <<Size:32/integer, H:32/integer, T:32/integer, NextT:32/integer>>}
+        when H >= ?HEADER_SZ, T >= ?HEADER_SZ, H =< T, T =< Size, NextT >= T, NextT =< Size ->
+      {H, T, NextT, Size};
+    {ok, Hdr} ->
+      erlang:error({invalid_queue_header, Hdr});
+    {error, Err} ->
+      erlang:error({cannot_read_header, Err})
   end.
 
 %% @doc Returns `true' if the queue is empty.
@@ -247,9 +246,7 @@ push(Mem, Term) ->
       TailBin = <<NewTail:32/integer>>,
       reserve_tail(Mem, TailBin),            % Reserve the next tail offset
       ok = emmap:pwrite(Mem, Tail, Msg),     % Write message
-      commit_tail(Mem, TailBin);             % Commit tail offset
-    G(Error) ->
-       Error
+      commit_tail(Mem, TailBin)              % Commit tail offset
   end)(Arg).
 
 %% @doc Pop a term from the queue. This function has a constant-time complexity.
@@ -302,21 +299,9 @@ peek_front(Mem) ->
 %% This function has a constant-time complexity.
 peek_back(Mem) ->
   case header(Mem) of
-    {Head, Tail, _NextTail, _Size} when Head < Tail+8, Head >= ?HEADER_SZ, Tail >= ?HEADER_SZ ->
-      % Read the size of the next message
-      {ok, <<Sz:32/integer>>} = emmap:pread(Mem, Tail-4, 4),
-      case Tail-Sz of
-        I when I >= Head ->
-          BinSz  = Sz-8,  % The size read is inclusive of the 2 sizes written before/after the msg
-          case emmap:pread(Mem, I, Sz-4) of
-            {ok, <<Sz:32/integer, Bin:BinSz/binary>>} ->
-              binary_to_term(Bin);
-            {error, Why} ->
-              erlang:error({invalid_msg_header, Why})
-          end;
-        _ ->
-          nil
-      end;
+    {Head, Tail, _NextTail, _Size} ->
+      {Msg, _PrevT} = read_last(Mem, Head, Tail),
+      Msg;
     _ ->
       nil
   end.
@@ -334,9 +319,9 @@ pop_and_purge(Mem) ->
       nil
   end.
 
-%% @doc Inspect all messages in the queue by passing it to a custom lambda function.
-%% The `Fun' takes a message and state and returns a `{cont, State}' to continue or
-%% `{halt, State}' to abort.
+%% @doc Inspect all messages in the queue iteratively by passing them to a custom
+%% lambda function. The `Fun' takes a message and state and returns a `{cont, State}'
+%% to continue or `{halt, State}' to abort.
 peek(Mem, Init, Fun) when is_function(Fun, 2) ->
   F = fun
     G(H, T, State) when H < T ->
@@ -349,6 +334,26 @@ peek(Mem, Init, Fun) when is_function(Fun, 2) ->
       end;
     G(_, _, State) ->
       State
+  end,
+  {Head, Tail, _, _} = header(Mem),
+  F(Head, Tail, Init).
+
+%% @doc Inspect all messages in the queue iteratively in the reverse order by passing 
+%% them to a custom lambda function. The `Fun' takes a message and state and returns a
+%% `{cont, State}' to continue or `{halt, State}' to abort.
+rpeek(Mem, Init, Fun) when is_function(Fun, 2) ->
+  F = fun G(H, T, State) ->
+    case read_last(Mem, H, T) of
+      {nil, _} ->
+        State;
+      {Msg, PrevT} -> 
+        case Fun(Msg, State) of
+          {cont, State1} ->
+            G(H, PrevT, State1);
+          {halt, State1} ->
+            State1
+        end
+    end
   end,
   {Head, Tail, _, _} = header(Mem),
   F(Head, Tail, Init).
@@ -379,7 +384,7 @@ pop(Mem, Init, Fun) when is_function(Fun, 2) ->
 
 read_head(Mem, Pop) ->
   case header(Mem) of
-    {Head,  Tail, NextTail, _SegmSize} when Head < Tail, Head >= ?HEADER_SZ, Tail >= ?HEADER_SZ ->
+    {Head,  Tail, NextTail, _SegmSize} when Head < Tail ->
       {Msg, NextHead} = read_first(Mem, Head),
       IsEnd  = (NextHead =:= Tail) andalso (NextHead =:= NextTail),
       case Pop of
@@ -393,12 +398,8 @@ read_head(Mem, Pop) ->
           update_head(Mem, NextHead),
           {Res, IsEnd}
       end;
-    {Head, Tail, _NextTail, _} when Head >= ?HEADER_SZ, Tail >= ?HEADER_SZ ->
-      nil;
-    {_Head, _Tail, _NextTail, _} = H ->
-      erlang:error({invalid_queue_header, H});
-    {error, Error} ->
-      erlang:error(Error)
+    {_Head, _Tail, _NextTail, _} ->
+      nil
   end.
 
 read_first(Mem, Head) ->
@@ -409,6 +410,24 @@ read_first(Mem, Head) ->
   EndSz /= Sz   andalso erlang:error({message_size_mismatch, {Sz, EndSz}, Head}),
   {binary_to_term(Bin), Head+Sz}.
  
+read_last(Mem, Head, Tail) when Head < Tail-8 ->
+  % Read the size of the next message
+  {ok, <<Sz:32/integer>>} = emmap:pread(Mem, Tail-4, 4),
+  case Tail-Sz of
+    I when I >= Head ->
+      BinSz  = Sz-8,  % The size read is inclusive of the 2 sizes written before/after the msg
+      case emmap:pread(Mem, I, Sz-4) of
+        {ok, <<Sz:32/integer, Bin:BinSz/binary>>} ->
+          {binary_to_term(Bin), I};
+        {error, Why} ->
+          erlang:error({invalid_msg_header, Why})
+      end;
+    I ->
+      {nil, I}
+  end;
+read_last(_Mem, I, I) ->
+  {nil, I}.
+
 update_head(Mem, NextHead) ->
   ok = emmap:pwrite(Mem, 4, <<NextHead:32/integer>>).
 

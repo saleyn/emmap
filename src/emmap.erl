@@ -93,8 +93,8 @@
 %%        read-ahead on the file.  This will help to reduce blocking on page faults later.</dd>
 %%   <dt>private</dt>
 %%    <dd>Create a private copy-on-write mapping.  Updates to the mapping are not visible to
-%%        other processes mapping the same file, and are not carried through to the underlying
-%%        file.</dd>
+%%        other OS or Erlang processes mapping the same file, and are not carried through to the
+%%        underlying file.</dd>
 %%   <dt>hugetlb</dt>
 %%    <dd>Allocate the mapping using "huge" pages.</dd>
 %%   <dt>huge_2mb</dt>
@@ -104,10 +104,10 @@
 %%   <dt>read</dt>
 %%    <dd>Open for reading (this is default).</dd>
 %%   <dt>shared</dt>
-%%    <dd>Share this mapping.  Updates to the mapping are visible to other processes mapping
-%%        the same region, and (in the case of file-backed mappings) are carried through to
-%%        the underlying file. May be used in combination with `sync' to precisely control when
-%%        updates are carried through to the underlying file.</dd>
+%%    <dd>Share this mapping.  Updates to the mapping are visible to other OS or Erlang processes
+%%        mapping the same region, and (in the case of file-backed mappings) are carried through
+%%        to the underlying file. May be used in combination with `sync' to precisely control
+%%        when updates are carried through to the underlying file.</dd>
 %%   <dt>shared_validate</dt>
 %%    <dd>This flag provides the same behavior as `shared' except that `shared' mappings ignore
 %%        unknown flags in flags.  By contrast, when creating a mapping using `shared_validate',
@@ -120,7 +120,7 @@
 %%        supporting DAX (direct mapping of persistent memory).  For other files, creating a
 %%        mapping with this flag results in an `eopnotsupp' error.
 %%        Shared file mappings with this flag provide the guarantee that while some memory is
-%%        mapped writable in the address space of the process, it will be visible in the same
+%%        mapped writable in the address space of the OS process, it will be visible in the same
 %%        file at the same offset even after the system crashes or is rebooted.  In conjunction
 %%        with the use of appropriate CPU instructions, this provides users of such mappings
 %%        with a more efficient way of making data modifications persistent.</dd>
