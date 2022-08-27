@@ -138,7 +138,7 @@ eshell#2> {ok, F, _} = emmap:open("/tmp/q.bin", 0, 128, [auto_unlink, shared, cr
 
 eshell#1> emmap:pwrite(F, 0, <<"abcdefg\n">>).
 
-eshell#2> emmap:pread(F, 0, 8). # Changes in eshell#1 are visible in eshell#2
+eshell#2> emmap:pread(F, 0, 8). % Changes in eshell#1 are visible in eshell#2
 {ok, <<"abcdefg\n">>}
 
 $ head -1 /tmp/q.bin            # They are also visible in another OS process reading from file
@@ -153,20 +153,20 @@ eshell#1> f(F), {ok, F, _} = emmap:open("/tmp/q.bin", 0, 128, [auto_unlink, crea
   write]).
 
 ^G
---> s        # Start a new shell process inside the same Erlang VM
---> c 2      # Connect to the new shell
+--> s        % Start a new shell process inside the same Erlang VM
+--> c 2      % Connect to the new shell
 eshell#2> f(F), {ok, F, _} = emmap:open("/tmp/q.bin", 0, 128, [auto_unlink, create, read,
   write]).
 
 ^G
---> c 1      # Switch back to the 1st shell
+--> c 1      % Switch back to the 1st shell
 eshell#1> emmap:pwrite(F, 0, <<"1234567\n">>).
 
 ^G
---> c 2      # Switch to the 2st shell
+--> c 2      % Switch to the 2st shell
 
 eshell#2> emmap:pread(F, 0, 8).
-{ok,<<0,0,0,0,0,0,0,0>>}    # changes from shell1 are invisible in the shell2 Erlang process
+{ok,<<0,0,0,0,0,0,0,0>>}    % changes from shell1 are invisible in the shell2 Erlang process
 
 # Run this in another terminal
 $ head -1 /tmp/q.bin        # returns no data because changes in shell1 are invisible
