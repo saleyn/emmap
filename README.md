@@ -127,7 +127,7 @@ automatically deleted when it is closed.
 This example preserves the immutability of binaries but allows `emmap` to have visibility
 of memory changes between Erlang processes and also between OS processes.
 
-```
+```erlang
 $ erl -pa _build/default/lib/emmap/ebin
 eshell#1> {ok, F, _} = emmap:open("/tmp/q.bin", 0, 128, [auto_unlink, shared, create, read,
   write]).
@@ -146,7 +146,7 @@ abcdefg
 ```
 
 Here it is without the `shared` option:
-```
+```erlang
 $ erl -pa _build/default/lib/emmap/ebin
 eshell#1> emmap:close(F).
 eshell#1> f(F), {ok, F, _} = emmap:open("/tmp/q.bin", 0, 128, [auto_unlink, create, read,
