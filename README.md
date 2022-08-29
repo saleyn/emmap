@@ -7,6 +7,10 @@ Erlang virtual machine.  It offers three sets of functions to implement:
 
 1. Generic read/write access to memory mapped files.
 2. Persistent atomic integer counters supporting basic arithmetic and logical operators.
+   This feature is an enhancement of the
+   [Erlang's atomic counters](https://www.erlang.org/doc/man/counters.html), by adding more
+   atomic operations (e.g. `xchg`, `cas`, `and`, `or`, and `xor`) for the counters, as well as
+   adding counter persistence.
 3. Persistent FIFO queue.
 
 ## Authors
