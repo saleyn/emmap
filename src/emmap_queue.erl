@@ -5,7 +5,9 @@
 %%%          module provides a gen_server API, which wraps the queue for use
 %%%          in multi-process applications.
 %%%          The queue is stored in a memory-mapped file, and it automatically
-%%%          grows if the messages are not dequeued from the queue.
+%%%          grows if the messages are not dequeued from the queue.  Messages
+%%%          stored in the queue can be compressed using variable compression
+%%%          level controlled by the argument to the `push/3' function.
 %%%          See test cases at the end of this module for sample use cases.
 %%% @author  Serge Aleynikov
 %%% @end
@@ -14,7 +16,7 @@
 %%%-----------------------------------------------------------------------------
 -module(emmap_queue).
 -export([open/3, close/1, flush/1]).
--export([purge/1, is_empty/1, length/1, push/2,
+-export([purge/1, is_empty/1, length/1, push/2, push/3,
          pop/1, pop/3, peek_front/1, peek_back/1, peek/3, rpeek/3, try_pop/2,
          pop_and_purge/1, try_pop_and_purge/2]).
 
@@ -224,7 +226,12 @@ length(Mem) ->
 
 %% @doc Push a term to the queue. This function has a constant-time complexity.
 push(Mem, Term) ->
-  Bin = term_to_binary(Term),
+  push(Mem, Term, 0).
+
+%% @doc Push a term to the queue. This function has a constant-time complexity.
+%% `Compression' is the compression level from `0' to `9', where `0' is no compression.
+push(Mem, Term, Compression) when is_integer(Compression), Compression >= 0, Compression < 10 ->
+  Bin = term_to_binary(Term, [{compressed, 0}, {minor_version, 2}]),
   Sz0 = byte_size(Bin)+8,
   Pad = Sz0 rem 8,
   Sz  = Sz0 + Pad,
@@ -471,7 +478,7 @@ spsc_queue_test() ->
 
   ?assertEqual([a,b,c,1,2,3], lists:reverse(peek(Mem, [], fun(I,S) -> {cont, [I | S]} end))),
 
-  ?assertEqual({16,112,112,1024}, header(Mem)),
+  ?assertEqual({16,106,106,1024}, header(Mem)),
   ?assertEqual(6, length(Mem)),
 
   % Dequeue data
@@ -484,13 +491,18 @@ spsc_queue_test() ->
   ?assertError(failed,     try_pop(Mem, fun(3) -> erlang:error(failed) end)),
   ?assertMatch({3, true},  read_head(Mem, true)),
   ?assertEqual(nil,        pop(Mem)),
-  ?assertEqual({112,112,112,1024}, header(Mem)),
+  ?assertEqual({106,106,106,1024}, header(Mem)),
   ?assert(purge(Mem)),
   ?assert(is_empty(Mem)),
   
   ?assertEqual([], [R || R <- [push(Mem, I) || I <- [a,b,1,2]], R /= ok]),
   ?assertEqual([a,b,1,2], lists:reverse(pop(Mem, [], fun(I,S) -> {cont, [I | S]} end))),
   ?assert(is_empty(Mem)),
+  Term = string:copies("x", 128),
+  ?assertEqual(ok,        push(Mem, Term, 9)),
+  ?assertEqual(ok,        push(Mem, Term, 6)),
+  ?assertEqual(ok,        push(Mem, Term, 1)),
+  ?assertEqual([Term, Term, Term], lists:reverse(pop(Mem, [], fun(I,S) -> {cont, [I | S]} end))),
   ?assertEqual(ok, flush(Mem)).
 
 file_size()             -> file_size(element(2, os:type())).
