@@ -32,6 +32,7 @@ jobs:
       run:  make test
 
   macOS:
+    runs-on: ${{ matrix.os }}
     name: OTP ${{ matrix.otp }} ${{ matrix.os }}.${{ matrix.compiler.compiler }}
     strategy:
       fail-fast: false
