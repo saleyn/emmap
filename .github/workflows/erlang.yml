@@ -33,17 +33,12 @@ jobs:
 
   macOS:
     name: OTP ${{ matrix.otp }} ${{ matrix.os }}.${{ matrix.compiler.compiler }}
-    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ macos-latest ]
         compiler:
           - { compiler: XCode, CC: cc, CXX: c++ }
-        otp: ["25.0.4"]
-
-    container:
-      image: erlang:${{matrix.otp}}
 
     steps:
       - uses: actions/checkout@v2
@@ -51,7 +46,7 @@ jobs:
         run: |
           brew update > /dev/null || true
           brew tap Homebrew/bundle
-          #brew install erlang
+          brew install erlang@24
           brew install rebar3
           #brew bundle --verbose
       - name: Compile
