@@ -37,17 +37,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ macos-12 ]
+        os: [ macos-latest ]
         compiler:
           - { compiler: XCode, CC: cc, CXX: c++ }
-        otp: ["25.0"]
+        otp: ["25.0.4"]
     steps:
       - uses: actions/checkout@v2
+      - uses: gleam-lang/setup-erlang@v1.1.3
+        with:
+          otp-version: ${{matrix.otp}}
       - name: Install Base Dependencies
         run: |
           brew update > /dev/null || true
           brew tap Homebrew/bundle
-          brew install erlang
+          #brew install erlang
           brew install rebar3
           #brew bundle --verbose
       - name: Compile
