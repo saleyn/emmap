@@ -22,7 +22,7 @@ jobs:
           - { compiler: GNU-11,  CC: gcc-11,   CXX: g++-11 }
           - { compiler: LLVM-12, CC: clang-12, CXX: clang++-12 }
           - { compiler: LLVM-11, CC: clang-11, CXX: clang++-11 }
-        otp: ["24.2", "25.0.3"]
+        otp: ["25.0.4"]
 
     steps:
     - uses: actions/checkout@v2
@@ -37,10 +37,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ macos-latest ]
+        os: [ macos-12 ]
         compiler:
           - { compiler: XCode, CC: cc, CXX: c++ }
-        otp: ["24.2", "25.0.3"]
+        otp: ["25.0.4"]
     steps:
       - uses: actions/checkout@v2
       - name: Install Base Dependencies
