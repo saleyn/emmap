@@ -1,6 +1,6 @@
 {application,emmap,
              [{description,"Erlang Memory-Mapped Files"},
-              {vsn,"2.0.5"},
+              {vsn,"2.0.6"},
               {modules,[emmap]},
               {registered,[]},
               {applications,[kernel,stdlib]},
