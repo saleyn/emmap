@@ -138,7 +138,9 @@ terminate(_Reason, #state{mem=Mem}) ->
 %%------------------------------------------------------------------------------
 
 %% @doc Open a memory mapped queue.
-open(Filename, Size, Opts) when is_list(Filename), is_integer(Size), is_list(Opts) ->
+-spec open(binary()|list(), integer(), list()) ->
+        {ok, emmap:mmap_file()} | {error, term()}.
+open(Filename, Size, Opts) when is_integer(Size), is_list(Opts) ->
   ok = filelib:ensure_dir(filename:dirname(Filename)),
   case emmap:open(Filename, 0, Size, [create, read, write | Opts]) of
     {ok, Mem, #{exist := true, size := SegmSize}} ->
@@ -514,7 +516,7 @@ check_size(darwin, _Sz) -> 2048;
 check_size(_,       Sz) -> Sz.
 
 gen_server_queue_test() ->
-  Filename  = "/tmp/queue2.bin",
+  Filename  = <<"/tmp/queue2.bin">>,
   {ok, Pid} = start_link(?MODULE, Filename, file_size(), [auto_unlink]),
   ok = enqueue(Pid,  a),
   ?assert(filelib:is_regular(Filename)),
