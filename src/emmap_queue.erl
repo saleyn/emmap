@@ -16,7 +16,7 @@
 %%%-----------------------------------------------------------------------------
 -module(emmap_queue).
 -export([open/3, close/1, flush/1]).
--export([purge/1, is_empty/1, length/1, push/2, push/3,
+-export([purge/1, is_empty/1, length/1, metadata/1, push/2, push/3,
          pop/1, pop/3, peek_front/1, peek_back/1, peek/3, rpeek/3, try_pop/2,
          pop_and_purge/1, try_pop_and_purge/2]).
 
@@ -39,9 +39,11 @@
 
 -include_lib("kernel/include/file.hrl").
 
+-type queue() :: emmap:mmap_file().
+
 -record(state, {
     filename :: string()
-  , mem      :: emmap:mmap_file()
+  , mem      :: queue()
   , segm_sz  :: non_neg_integer()
 }).
 
@@ -121,8 +123,7 @@ handle_call({try_pop, Fun}, _From, #state{mem=Mem} = State) ->
   end;
 
 handle_call(info, _From, #state{mem=Mem} = State) ->
-  {Head, Tail, NextTail, SegmSize} = header(Mem),
-  {reply, #{head => Head, tail => Tail, next_tail => NextTail, size => SegmSize}, State}.
+  {reply, metadata(Mem), State}.
 
 handle_cast(Msg, State) ->
   {stop, {cast_not_implemented, Msg}, State}.
@@ -139,7 +140,7 @@ terminate(_Reason, #state{mem=Mem}) ->
 
 %% @doc Open a memory mapped queue.
 -spec open(binary()|list(), integer(), list()) ->
-        {ok, emmap:mmap_file()} | {error, term()}.
+        {ok, queue()} | {error, term()}.
 open(Filename, Size, Opts) when is_integer(Size), is_list(Opts) ->
   ok = filelib:ensure_dir(filename:dirname(Filename)),
   case emmap:open(Filename, 0, Size, [create, read, write | Opts]) of
@@ -164,15 +165,18 @@ open(Filename, Size, Opts) when is_integer(Size), is_list(Opts) ->
   end.
 
 %% @doc Close a previously open queue.
+-spec close(queue()) -> ok.
 close(Mem) ->
   emmap:close(Mem).
 
 %% @doc Asynchronously flush the modified memory used by the queue to disk.
 %% See notes of `emmap:sync/1'.  This call is optional.
+-spec flush(queue()) -> ok.
 flush(Mem) ->
   emmap:flush(Mem).
 
 %% @doc Purge queue.  It is a constant time operation.
+-spec purge(queue()) -> boolean.
 purge(Mem) ->
   case is_empty_queue(Mem) of
     {true, 0} ->
@@ -183,6 +187,13 @@ purge(Mem) ->
     false ->
       false
   end.
+
+%% @doc Get queue metadata
+-spec metadata(queue()) ->
+  #{head => integer(), tail => integer(), next_tail => integer(), size => integer()}.
+metadata(Mem) ->
+  {Head, Tail, NextTail, SegmSize} = header(Mem),
+  #{head => Head, tail => Tail, next_tail => NextTail, size => SegmSize}.
 
 header(Mem) ->
   case emmap:pread(Mem, 0, 16) of
@@ -469,6 +480,7 @@ spsc_queue_test() ->
   ?assertEqual(nil, peek_back(Mem)),
   % Enqueue data
   ?assertEqual(ok,  push(Mem, a)),
+  ?assertMatch(#{head := 16, tail := 32, next_tail := 32, size := 1024}, metadata(Mem)),
   ?assertEqual(a,   peek_front(Mem)),
   ?assertEqual(a,   peek_back(Mem)),
 
