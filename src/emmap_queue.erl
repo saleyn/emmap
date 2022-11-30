@@ -176,7 +176,7 @@ flush(Mem) ->
   emmap:flush(Mem).
 
 %% @doc Purge queue.  It is a constant time operation.
--spec purge(queue()) -> boolean.
+-spec purge(queue()) -> boolean().
 purge(Mem) ->
   case is_empty_queue(Mem) of
     {true, 0} ->
@@ -318,13 +318,9 @@ peek_front(Mem) ->
 %% @doc Peek the last written term at the back of the FIFO queue without removing it.
 %% This function has a constant-time complexity.
 peek_back(Mem) ->
-  case header(Mem) of
-    {Head, Tail, _NextTail, _Size} ->
-      {Msg, _PrevT} = read_last(Mem, Head, Tail),
-      Msg;
-    _ ->
-      nil
-  end.
+  {Head, Tail, _NextTail, _Size} = header(Mem),
+  {Msg, _PrevT} = read_last(Mem, Head, Tail),
+  Msg.
  
 %% @doc Pop a term from the queue and reclaim queue's memory if the queue is empty.
 %% This function has a constant-time complexity.

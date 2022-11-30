@@ -12,6 +12,9 @@ clean:
 deps:
 	@$(REBAR) get-deps
 
+check:
+	@$(REBAR) dialyzer
+
 test eunit:
 	@TERM=dumb $(REBAR) eunit
 

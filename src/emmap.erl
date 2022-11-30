@@ -180,7 +180,7 @@ open(FileName, Options) when is_binary(FileName) ->
 open(FileName, Options) when is_list(FileName) ->
     case file:read_file_info(FileName) of
         {ok, FileInfo} ->
-            open(FileName, 0, FileInfo#file_info.size, Options);
+            open(FileName, 0, nvl(FileInfo#file_info.size, 0), Options);
         _Error ->
             open(FileName, 0, 0, Options)
     end.
@@ -191,8 +191,8 @@ open(FileName, Options) when is_list(FileName) ->
 %% For opening an existing file for writing `[read, write]' options are required, and `Len'
 %% can be `0'.
 -spec open(File::string()|binary(),
-          Offset::pos_integer(),
-          Length::pos_integer(),
+          Offset::non_neg_integer(),
+          Length::non_neg_integer(),
           Options::[ open_option() ]) ->
                  {ok, mmap_file(), open_extra_info()} | {error, term()}.
 open(FileName, Off, Len, Options) when is_binary(FileName) ->
@@ -216,7 +216,7 @@ close_nif(_) ->
 %% @doc Resize shared memory.
 %% The new size will double the existing size up until the `max_inc_size' threshold (passed
 %% to `open/4' (default 64M), otherwise incremented by `max_inc_size'.
--spec resize(File::mmap_file()) -> {ok, NewSize::non_neg_integer()} | {error, string()}.
+-spec resize(File::mmap_file()) -> {ok, NewSize::non_neg_integer()} | {error, atom()|string()}.
 resize(#file_descriptor{module=?MODULE, data=Mem}) -> resize_nif(Mem, 0).
 
 %% @doc Resize shared memory to a given new size.
@@ -238,15 +238,17 @@ sync_nif(_) ->
     erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Read `Len' bytes from a memory-mapped file at a given offset `Off'.
--spec pread(File::mmap_file(), Offset::pos_integer(), Length::pos_integer()) ->
+-spec pread(File::mmap_file(), Offset::non_neg_integer(), Length::non_neg_integer()) ->
                    {ok, binary()} | {error, term()} | eof.
 
-pread(#file_descriptor{module=?MODULE, data=Mem}, Off, Len) -> pread_nif(Mem, Off, Len).
-pread_nif(_,_,_) -> {ok, <<>>}.
+pread(#file_descriptor{module=?MODULE, data=Mem}, Off, Len) ->
+  pread_nif(Mem, Off, Len).
+pread_nif(_,_,_) ->
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Read next `Len' bytes from a memory-mapped file.
 %% Internally the new position within the file is incremented by `Len'.
--spec read(File::mmap_file(), Length::pos_integer()) ->
+-spec read(File::mmap_file(), Length::non_neg_integer()) ->
                    {ok, binary()} | {error, term()} | eof.
 
 read(#file_descriptor{module=?MODULE, data=Mem}, Len) -> read_nif(Mem, Len).
@@ -254,15 +256,14 @@ read_nif(_,_) ->
     erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 
--spec read_line(File::mmap_file()) ->
-                   {ok, binary()} | {error, term()} | eof.
+-spec read_line(File::mmap_file()) -> {ok, binary()} | {error, term()} | eof.
 
 read_line(#file_descriptor{module=?MODULE, data=Mem}) -> read_line_nif(Mem).
 read_line_nif(_) ->
     erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Write `Data' bytes to a memory-mapped file at a given offset `Off'.
--spec pwrite(File::mmap_file(), Position::pos_integer(), Data::binary()) ->
+-spec pwrite(File::mmap_file(), Position::non_neg_integer(), Data::binary()) ->
                     ok | {error, term()}.
 pwrite(#file_descriptor{module=?MODULE, data=Mem}, Off, Data) -> pwrite_nif(Mem, Off, Data).
 pwrite_nif(_,_,_) ->
@@ -270,8 +271,8 @@ pwrite_nif(_,_,_) ->
 
 %% @doc Write `Data' bytes to a memory-mapped file at a given offset `At'.
 -spec position(File::mmap_file(),
-               Position::pos_integer() | {bof|cur|eof, Position::integer()} ) ->
-                    {ok, pos_integer()} | {error, term()}.
+               Position::non_neg_integer() | {bof|cur|eof, Position::integer()} ) ->
+                    {ok, non_neg_integer()} | {error, term()}.
 position(#file_descriptor{module=?MODULE, data=Mem}, At)
   when is_integer(At) ->
     position_nif(Mem, bof, At);
@@ -289,7 +290,7 @@ position_nif(_,_From,_Off) ->
 %% using specified argument `Value'.  The function returns an old value at that
 %% location.  This function is thread-safe and can be used for implementing
 %% persistent counters.
--spec patomic_add(File::mmap_file(), Position::pos_integer(), Value::integer()) ->
+-spec patomic_add(File::mmap_file(), Position::non_neg_integer(), Value::integer()) ->
         {ok, OldValue::integer()} | {error, atom()} | no_return().
 patomic_add(#file_descriptor{module=?MODULE, data=Mem}, Off, Value)
   when is_integer(Off), is_integer(Value) ->
@@ -302,7 +303,7 @@ patomic_add_nif(_,_,_) ->
 %% using specified argument `Value'.  The function returns an old value at that
 %% location.  This function is thread-safe and can be used for implementing
 %% persistent counters.
--spec patomic_sub(File::mmap_file(), Position::pos_integer(), Value::integer()) ->
+-spec patomic_sub(File::mmap_file(), Position::non_neg_integer(), Value::integer()) ->
         {ok, OldValue::integer()} | {error, atom()} | no_return().
 patomic_sub(#file_descriptor{module=?MODULE, data=Mem}, Off, Value)
   when is_integer(Off), is_integer(Value) ->
@@ -314,7 +315,7 @@ patomic_sub_nif(_,_,_) ->
 %% @doc Perform an atomic AND operation on a 64-bit integer value at given `Position'
 %% using specified argument `Value'.  The function returns an AND'd value at that
 %% location.
--spec patomic_and(File::mmap_file(), Position::pos_integer(), Value::integer()) ->
+-spec patomic_and(File::mmap_file(), Position::non_neg_integer(), Value::integer()) ->
         {ok, integer()} | {error, atom()} | no_return().
 patomic_and(#file_descriptor{module=?MODULE, data=Mem}, Off, Value)
   when is_integer(Off), is_integer(Value) ->
@@ -326,7 +327,7 @@ patomic_and_nif(_,_,_) ->
 %% @doc Perform an atomic OR operation on a 64-bit integer value at given `Position'
 %% using specified argument `Value'.  The function returns an OR'd value at that
 %% location.
--spec patomic_or(File::mmap_file(), Position::pos_integer(), Value::integer()) ->
+-spec patomic_or(File::mmap_file(), Position::non_neg_integer(), Value::integer()) ->
         {ok, integer()} | {error, atom()} | no_return().
 patomic_or(#file_descriptor{module=?MODULE, data=Mem}, Off, Value)
   when is_integer(Off), is_integer(Value) ->
@@ -338,7 +339,7 @@ patomic_or_nif(_,_,_) ->
 %% @doc Perform an atomic XOR operation on a 64-bit integer value at given `Position'
 %% using specified argument `Value'.  The function returns an XOR'd value at that
 %% location.
--spec patomic_xor(File::mmap_file(), Position::pos_integer(), Value::integer()) ->
+-spec patomic_xor(File::mmap_file(), Position::non_neg_integer(), Value::integer()) ->
         {ok, integer()} | {error, atom()} | no_return().
 patomic_xor(#file_descriptor{module=?MODULE, data=Mem}, Off, Value)
   when is_integer(Off), is_integer(Value) ->
@@ -350,7 +351,7 @@ patomic_xor_nif(_,_,_) ->
 %% @doc Perform an atomic EXCHANGE operation on a 64-bit integer value at given `Position'
 %% using specified argument `Value'.  The function returns an old value at that
 %% location.
--spec patomic_xchg(File::mmap_file(), Position::pos_integer(), Value::integer()) ->
+-spec patomic_xchg(File::mmap_file(), Position::non_neg_integer(), Value::integer()) ->
         {ok, integer()} | {error, atom()} | no_return().
 patomic_xchg(#file_descriptor{module=?MODULE, data=Mem}, Off, Value)
   when is_integer(Off), is_integer(Value) ->
@@ -362,7 +363,7 @@ patomic_xchg_nif(_,_,_) ->
 %% @doc Perform an atomic compare and swap (CAS) operation on a 64-bit integer value
 %% at given `Position' using specified argument `Value'.  The function returns a
 %% tuple `{Success, OldVal}', where `OldVal' is the old value at that location.
--spec patomic_cas(File::mmap_file(), Position::pos_integer(), integer(), integer()) ->
+-spec patomic_cas(File::mmap_file(), Position::non_neg_integer(), integer(), integer()) ->
         {boolean(), integer()} | {error, atom()} | no_return().
 patomic_cas(#file_descriptor{module=?MODULE, data=Mem}, Off, OldValue, Value)
   when is_integer(Off), is_integer(OldValue), is_integer(Value) ->
@@ -373,7 +374,7 @@ patomic_cas_nif(_,_,_,_) ->
 
 %% @doc Perform an atomic store operation of a 64-bit integer `Value' at given `Position'.
 %% This function is thread-safe and can be used for implementing persistent counters.
--spec patomic_write_integer(File::mmap_file(), Position::pos_integer(), Value::integer()) -> ok.
+-spec patomic_write_integer(File::mmap_file(), Position::non_neg_integer(), Value::integer()) -> ok.
 patomic_write_integer(#file_descriptor{module=?MODULE, data=Mem}, Off, Value)
   when is_integer(Off), is_integer(Value) ->
     patomic_write_int_nif(Mem, Off, Value).
@@ -383,7 +384,7 @@ patomic_write_int_nif(_,_,_) ->
 
 %% @doc Perform an atomic load operation on a 64-bit integer value at given `Position'.
 %% This function is thread-safe and can be used for implementing persistent counters.
--spec patomic_read_integer(File::mmap_file(), Position::pos_integer()) -> Value::integer().
+-spec patomic_read_integer(File::mmap_file(), Position::non_neg_integer()) -> Value::integer().
 patomic_read_integer(#file_descriptor{module=?MODULE, data=Mem}, Off) when is_integer(Off) ->
     patomic_read_int_nif(Mem, Off).
 
@@ -401,20 +402,22 @@ open_counters(Filename, NumCounters) ->
     MMAP     = 
         case open(Filename, 0, Size, [create, read, write, shared, direct, nolock]) of
             {ok, F, #{exist := false}} when NumCounters > 0 ->
-                ok = pwrite(F, 0, <<"EMMAP01\n", NumCounters:64/little-integer>>),
+                ok = pwrite(F, 0, <<"EMMAP01\n", NumCounters:64/integer-little>>),
                 {F, NumCounters};
             {ok, F, #{exist := true}} ->
                 case pread(F, 0, 16) of
-                    {ok, <<"EMMAP", _,_,$\n, N:64/little-integer>>} when N == NumCounters; NumCounters == 0 ->
+                    {ok, <<"EMMAP", _,_,$\n, N:64/integer-little>>} when N == NumCounters; NumCounters == 0 ->
                         {F, N};
                     {ok, _Other} when FileSize == Size ->
-                        io:format("Initializing mmap: ~p\n", [_Other]),
-                        ok = pwrite(F, 0, <<"EMMAP01\n", NumCounters:64/little-integer>>),
+                        % io:format("Initializing mmap: ~p\n", [_Other]),
+                        ok = pwrite(F, 0, <<"EMMAP01\n", NumCounters:64/integer-little>>),
                         lists:foldl(fun(I, _) ->
-                            ok = pwrite(F, 16+I*8, <<0:64/little-integer>>),
+                            ok = pwrite(F, 16+I*8, <<0:64/integer-little>>),
                             []
                         end, [], lists:seq(0, NumCounters-1)),
                         {F, NumCounters};
+                    {ok, Header} ->
+                        erlang:error({invalid_file_header, Filename, Header});
                     {error, Why} ->
                         erlang:error({cannot_read_data, Filename, Why})
                 end;
@@ -454,6 +457,9 @@ read_counter({MFile, NumCnts}, CounterNum)
         when NumCnts > CounterNum, CounterNum >= 0, is_integer(CounterNum) ->
     patomic_read_integer(MFile, 16+CounterNum*8).
   
+nvl(undefined, V) -> V;
+nvl(V,         _) -> V.
+
 -ifdef(EUNIT).
 
 simple_test() ->
