@@ -23,6 +23,8 @@
 -export([start_link/4, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 -export([enqueue/2, dequeue/1, try_dequeue/2, inspect/1, info/1]).
 
+-export_type([queue/0]).
+
 -compile({no_auto_import,[length/1]}).
 
 -behavior(gen_server).

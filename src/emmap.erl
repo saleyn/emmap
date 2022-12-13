@@ -12,7 +12,7 @@
 -export([inc_counter/2, inc_counter/3, dec_counter/2, dec_counter/3]).
 -export([set_counter/3, read_counter/2]).
 
--export_type([resource/0, mmap_file/0, open_option/0]).
+-export_type([resource/0, mmap_file/0, open_option/0, open_extra_info/0]).
 
 -on_load(init/0).
 
