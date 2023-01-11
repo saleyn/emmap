@@ -18,14 +18,14 @@
 -export([open/3, close/1, flush/1]).
 -export([purge/1, is_empty/1, length/1, metadata/1, push/2, push/3,
          pop/1, pop/3, peek_front/1, peek_back/1, peek/3, rpeek/3, try_pop/2,
-         pop_and_purge/1, try_pop_and_purge/2]).
+         pop_and_purge/1, try_pop_and_purge/2, erase/1]).
 
 -export([start_link/4, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 -export([enqueue/2, dequeue/1, try_dequeue/2, inspect/1, info/1]).
 
 -export_type([queue/0]).
 
--compile({no_auto_import,[length/1]}).
+-compile({no_auto_import,[length/1, erase/1]}).
 
 -behavior(gen_server).
 
@@ -400,6 +400,10 @@ pop(Mem, Init, Fun) when is_function(Fun, 2) ->
   {Head, Tail, _, _} = header(Mem),
   F(Head, Tail, Init).
 
+%% @doc Erase the content of the queue. All messages in the queue are discarded!
+erase(Mem) ->
+  init_header(Mem).
+
 read_head(Mem, Pop) ->
   case header(Mem) of
     {Head,  Tail, NextTail, _SegmSize} when Head < Tail ->
@@ -515,7 +519,11 @@ spsc_queue_test() ->
   ?assertEqual(ok,        push(Mem, Term, 6)),
   ?assertEqual(ok,        push(Mem, Term, 1)),
   ?assertEqual([Term, Term, Term], lists:reverse(pop(Mem, [], fun(I,S) -> {cont, [I | S]} end))),
-  ?assertEqual(ok, flush(Mem)).
+  ?assertEqual(ok,        flush(Mem)),
+  ?assert(is_empty(Mem)),
+  ?assertEqual(ok,        push(Mem, Term, 1)),
+  ?assertEqual(ok,        erase(Mem)),
+  ?assert(is_empty(Mem)).
 
 file_size()             -> file_size(element(2, os:type())).
 file_size(darwin)       -> 2048;
