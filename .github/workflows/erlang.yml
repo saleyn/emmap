@@ -49,7 +49,7 @@ jobs:
         run: |
           brew update > /dev/null || true
           brew tap Homebrew/bundle
-          brew install erlang@24
+          brew install erlang@25
           brew install rebar3
           #brew bundle --verbose
       - name: Compile
