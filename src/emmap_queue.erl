@@ -200,7 +200,7 @@ metadata(Mem) ->
 header(Mem) ->
   case emmap:pread(Mem, 0, 16) of
     {ok, <<Size:32/integer, H:32/integer, T:32/integer, NextT:32/integer>>}
-        when H >= ?HEADER_SZ, T >= ?HEADER_SZ, H =< T, T =< Size, NextT >= T, NextT =< Size ->
+        when ?HEADER_SZ =< H, H =< T, T =< NextT, NextT =< Size ->
       {H, T, NextT, Size};
     {ok, Hdr} ->
       erlang:error({invalid_queue_header, Hdr});
