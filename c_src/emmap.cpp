@@ -14,6 +14,14 @@
 
 static ErlNifResourceType* MMAP_RESOURCE;
 
+#ifndef __has_builtin
+  #error "__has_builtin is not defined"
+#endif
+
+#if not __has_builtin(__builtin_ctzll)
+  #error "__builtin_ctzll is not defined"
+#endif
+
 #ifndef MAP_NOCACHE
 /* No MAP_NOCACHE on Linux - just bypass this option */
 # define MAP_NOCACHE (0)
@@ -207,6 +215,13 @@ static ERL_NIF_TERM emmap_patomic_cas      (ErlNifEnv*, int argc, const ERL_NIF_
 static ERL_NIF_TERM emmap_patomic_read_int (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM emmap_patomic_write_int(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 
+// fixed-size blocks storage operations
+static ERL_NIF_TERM emmap_init_bs(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_read_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_take_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_store_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_free_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+
 extern "C" {
 
   static ErlNifFunc nif_funcs[] =
@@ -229,6 +244,11 @@ extern "C" {
     {"position_nif",          3, emmap_position},
     {"read_nif",              2, emmap_read},
     {"read_line_nif",         1, emmap_read_line},
+    {"init_bs_nif",           2, emmap_init_bs},
+    {"read_blk_nif",          1, emmap_read_blk},
+    {"take_blk_nif",          1, emmap_take_blk},
+    {"store_blk_nif",         1, emmap_store_blk},
+    {"free_blk_nif",          1, emmap_free_blk},
   };
 
 };
@@ -1117,4 +1137,57 @@ static ERL_NIF_TERM emmap_position(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
   RW_UNLOCK;
 
   return enif_make_tuple2(env, ATOM_OK, enif_make_ulong(env, position));
+}
+
+struct bs_head {
+  size_t block_size;
+};
+
+// init fixed-size blocks storage
+static ERL_NIF_TERM emmap_init_bs(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  size_t block_size;
+  mhandle* handle;
+  if (argc!=2
+      || !enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
+      || !enif_get_ulong(env, argv[1], &block_size)
+      || sizeof(bs_head) > handle->len
+      )
+    return enif_make_badarg(env);
+
+  if ((handle->prot & PROT_WRITE) == 0) {
+    return make_error(env, ATOM_EACCES);
+  }
+
+  RW_LOCK;
+  if (handle->closed()) {
+    RW_UNLOCK;
+    return make_error(env, ATOM_CLOSED);
+  }
+
+  bs_head& hdr = *(bs_head*)handle->mem;
+  hdr.block_size = block_size;
+  RW_UNLOCK;
+
+  return ATOM_OK;
+}
+
+static ERL_NIF_TERM emmap_read_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  return ATOM_ERROR;
+}
+
+static ERL_NIF_TERM emmap_take_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  return ATOM_ERROR;
+}
+
+static ERL_NIF_TERM emmap_store_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  return ATOM_ERROR;
+}
+
+static ERL_NIF_TERM emmap_free_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  return ATOM_ERROR;
 }
