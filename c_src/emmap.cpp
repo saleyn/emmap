@@ -12,15 +12,9 @@
 #include <list>
 #include <erl_nif.h>
 
+#include "bs.hpp"
+
 static ErlNifResourceType* MMAP_RESOURCE;
-
-#ifndef __has_builtin
-  #error "__has_builtin is not defined"
-#endif
-
-#if not __has_builtin(__builtin_ctzll)
-  #error "__builtin_ctzll is not defined"
-#endif
 
 #ifndef MAP_NOCACHE
 /* No MAP_NOCACHE on Linux - just bypass this option */
@@ -1138,10 +1132,6 @@ static ERL_NIF_TERM emmap_position(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
 
   return enif_make_tuple2(env, ATOM_OK, enif_make_ulong(env, position));
 }
-
-struct bs_head {
-  size_t block_size;
-};
 
 // init fixed-size blocks storage
 static ERL_NIF_TERM emmap_init_bs(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
