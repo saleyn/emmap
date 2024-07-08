@@ -12,7 +12,7 @@
 #include <list>
 #include <erl_nif.h>
 
-#include "bs.hpp"
+#include "bsna.hpp"
 
 static ErlNifResourceType* MMAP_RESOURCE;
 
@@ -1156,7 +1156,7 @@ static ERL_NIF_TERM emmap_init_bs(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
   }
 
   bs_head& hdr = *(bs_head*)handle->mem;
-  hdr.block_size = block_size;
+  hdr.init(block_size);
   RW_UNLOCK;
 
   return ATOM_OK;
@@ -1174,7 +1174,31 @@ static ERL_NIF_TERM emmap_take_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
 
 static ERL_NIF_TERM emmap_store_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
-  return ATOM_ERROR;
+  mhandle* handle;
+  ErlNifBinary bin;
+  if (argc!=2
+      || !enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
+      || !enif_inspect_binary(env, argv[1], &bin)
+      || sizeof(bs_head) > handle->len
+      )
+    return enif_make_badarg(env);
+
+  if ((handle->prot & PROT_WRITE) == 0) {
+    return make_error(env, ATOM_EACCES);
+  }
+
+  RW_LOCK;
+  if (handle->closed()) {
+    RW_UNLOCK;
+    return make_error(env, ATOM_CLOSED);
+  }
+
+  bs_head& hdr = *(bs_head*)handle->mem;
+  char *mem = (char *)handle->mem;
+  hdr.store(mem + sizeof(bs_head), mem + handle->len, bin);
+  RW_UNLOCK;
+
+  return ATOM_OK;
 }
 
 static ERL_NIF_TERM emmap_free_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
