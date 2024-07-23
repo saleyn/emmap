@@ -678,24 +678,32 @@ static ERL_NIF_TERM emmap_resize(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
     return make_error(env, ATOM_CLOSED);
   }
 
-  if (new_size == 0)
-    new_size = handle->len < handle->max_inc_size
-             ? handle->len * 2 : handle->len + handle->max_inc_size;
-
-  void* addr = mremap(handle->mem, handle->len, new_size, MREMAP_MAYMOVE);
-  if (addr == (void*)-1) {
+  if (resize(handle, new_size) < 0) {
     const char* err = strerror_compat(errno);
     RW_UNLOCK;
     return make_error_tuple(env, err);
   }
-
-  handle->mem = addr;
-  handle->len = new_size;
   RW_UNLOCK;
 
   return enif_make_tuple2(env, ATOM_OK, enif_make_ulong(env, new_size));
 #endif
 }
+
+#ifndef __APPLE__
+int resize(mhandle* handle, unsigned long& new_size) {
+  if (new_size == 0)
+    new_size = handle->len < handle->max_inc_size
+             ? handle->len * 2 : handle->len + handle->max_inc_size;
+
+  void* addr = mremap(handle->mem, handle->len, new_size, MREMAP_MAYMOVE);
+  if (addr == (void*)-1)
+    return -1;
+
+  handle->mem = addr;
+  handle->len = new_size;
+  return 0;
+}
+#endif
 
 static ERL_NIF_TERM emmap_pwrite(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
@@ -1195,7 +1203,36 @@ static ERL_NIF_TERM emmap_store_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM
 
   bs_head& hdr = *(bs_head*)handle->mem;
   char *mem = (char *)handle->mem;
-  hdr.store(mem + sizeof(bs_head), mem + handle->len, bin);
+
+  char *start = mem + sizeof(bs_head);
+  char *stop = mem + handle->len;
+
+  while (true) {
+    switch (hdr.store(start, stop, bin)) {
+    case 0:
+      break;
+
+    case -1:
+      return make_error_tuple(env, "exhausted");
+
+    case -2:
+      if (handle->fixed_size)
+        return make_error(env, ATOM_FIXED_SIZE);
+#ifdef __APPLE__
+      return make_error(env, ATOM_FIXED_SIZE);
+#else
+      if (resize(handle, new_size) < 0) {
+        const char* err = strerror_compat(errno);
+        RW_UNLOCK;
+        return make_error_tuple(env, err);
+      }
+      continue;
+#endif
+    }
+
+    break;
+  }
+
   RW_UNLOCK;
 
   return ATOM_OK;

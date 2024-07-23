@@ -81,7 +81,8 @@ int alloc<1>(void *mem, void *end, size_t bs) {
   if (n < 0)
     return -1;
 
-  char *p = (char *)mem + n * bs;
+  // pointer to the data block
+  char *p = ptr<1>(mem, n, bs);
   if (p + bs > end) return -2;
 
   mask ^= (1 << n);
