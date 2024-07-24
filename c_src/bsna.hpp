@@ -46,9 +46,7 @@ static inline
 uint64_t& get_mask(void* mem, void*& last) {
   // initialize mask if not yet done
   if (mem > last) {
-    fprintf(stderr, "%d> write at %p\r\n", __LINE__, mem);
     *(uint64_t*)mem = 0xffff'ffff'ffff'ffff;
-    fprintf(stderr, "%d> write at %p done\r\n", __LINE__, mem);
     last = mem;
   }
   return *(uint64_t *)mem;
@@ -57,12 +55,10 @@ uint64_t& get_mask(void* mem, void*& last) {
 template<int N>
 int alloc(void *mem, void*& last, void *end, size_t bs) {
   if ((char *)mem + 8 > end) return -2;
-  assert((char *)mem + 8 <= end);
   uint64_t& mask = get_mask(mem, last);
 
   while (true) {
     // find group that not yet filled (marked by 1)
-    fprintf(stderr, "%d> read at %p\r\n", __LINE__, &mask);
     int n = __builtin_ffsll(mask) - 1;
     if (n < 0) return -1;
 
@@ -75,7 +71,6 @@ int alloc(void *mem, void*& last, void *end, size_t bs) {
 
     if (m < 0) {
       // ensure mask bit cleared to mark group filled
-      fprintf(stderr, "%d> read-write at %p\r\n", __LINE__, &mask);
       mask &= ~(1ul << n);
 
       // try another group
@@ -90,10 +85,8 @@ int alloc(void *mem, void*& last, void *end, size_t bs) {
 template<>
 int alloc<1>(void *mem, void*& last, void *end, size_t bs) {
   if ((char *)mem + 8 > end) return -2;
-  assert((char *)mem + 8 <= end);
   uint64_t& mask = get_mask(mem, last);
 
-  fprintf(stderr, "%d> read at %p\r\n", __LINE__, &mask);
   int n = __builtin_ffsll(mask) - 1;
   if (n < 0) return -1;
 
@@ -101,7 +94,6 @@ int alloc<1>(void *mem, void*& last, void *end, size_t bs) {
   char *p = ptr<1>(mem, n, bs);
   if (p + bs > end) return -2;
 
-  fprintf(stderr, "%d> read-write at %p\r\n", __LINE__, &mask);
   mask ^= (1ul << n);
   return n;
 }
@@ -110,19 +102,15 @@ template<int N>
 int store(void *mem, void*& last, void *end, const ErlNifBinary& bin, size_t bs) {
   int n = alloc<N>(mem, last, end, bs);
   if (n < 0) return n;
-  assert(bs == bin.size);
-  void *p = pointer<N>(mem, n, bs);
-  assert((char *)p + bin.size <= end);
-  // memcpy(p, bin.data, bin.size);
-  // memcpy(pointer<N>(mem, n, bs), bin.data, bin.size);
+  memcpy(pointer<N>(mem, n, bs), bin.data, bin.size);
   return n;
 }
 
 }
 
 struct bs_head {
-  uint64_t block_size;
-  int64_t limo; // Last Initialized Mask Offset
+  uint32_t block_size;
+  ssize_t limo; // Last Initialized Mask Offset
 
   void init(unsigned block_size_) {
     block_size = block_size_;

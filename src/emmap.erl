@@ -13,7 +13,7 @@
 -export([set_counter/3, read_counter/2]).
 
 -export([
-    init_block_storage/2, store_block/2, block_storage_test/0
+    init_block_storage/2, store_block/2
 ]).
 
 -export_type([resource/0, mmap_file/0, open_option/0, open_extra_info/0]).
@@ -480,8 +480,10 @@ store_block(#file_descriptor{module=?MODULE, data=Mem}, Data) when is_binary(Dat
 store_blk_nif(_,_) ->
     erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
+-ifdef(EUNIT).
+
 block_storage_test() ->
-    {ok, MFile, #{size := 8}} = emmap:open("/tmp/storage.bin", 0, 8, [create, read, write, shared, debug]),
+    {ok, MFile, #{size := 8}} = emmap:open("storage.bin", 0, 8, [create, write, shared, debug]),
     ok = emmap:init_block_storage(MFile, 8),
     write_n_blocks(4095, MFile, 8),
     ok = emmap:flush(MFile),
@@ -492,8 +494,6 @@ write_n_blocks(N, MFile, Size) ->
     {ok, _Addr} = emmap:store_block(MFile, rand:bytes(Size)),
     % io:format(user, "addr: ~p~n", [Addr]),
     write_n_blocks(N - 1, MFile, Size).
-
--ifdef(EUNIT).
 
 simple_test() ->
     {ok, File} = file:open("test.data", [raw, write]),

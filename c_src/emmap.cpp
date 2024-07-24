@@ -41,10 +41,11 @@ static void debug(bool dbg, const char* fmt, Args&&... args)
 
 struct mhandle
 {
-  mhandle(void* mem,   const char* file, size_t size, bool direct,
+  mhandle(void* mem, const char* file, int fd, size_t size, bool direct,
           bool fixed_size,  size_t max_inc_size,
           bool auto_unlink, int    prot, bool   lock, bool dbg)
     : position(0)
+    , fd(fd)
     , direct(direct)
     , prot(prot)
     , dbg(dbg)
@@ -109,6 +110,7 @@ struct mhandle
   using MemList = std::list<MemSlot>;
 
   size_t          position;
+  int             fd;
   bool            direct;
   int             prot;
   bool            dbg;
@@ -489,6 +491,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
 
   int fd = -1;
 
+  bool reuse = (open_flags & O_CREAT) == 0;
   bool exists = false;
 
   if ((flags & MAP_ANON) == 0) {
@@ -497,7 +500,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
     if (!exists) {
       if (len == 0)
         return make_error_tuple(env, "Missing {size, N} option");
-      if ((open_flags & O_CREAT) == 0)
+      if (reuse)
         return make_error_tuple(env, "Missing 'create' option");
     }
 
@@ -519,7 +522,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
       fsize = st.st_size;
     }
 
-    if (exists && len > 0 && fsize != long(len) && fsize > 0) {
+    if (exists && reuse && len > 0 && fsize != long(len) && fsize > 0) {
       char buf[1280];
       snprintf(buf, sizeof(buf), "File %s has different size (%ld) than requested (%ld)",
                path, long(fsize), len);
@@ -559,20 +562,18 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
   if   (res == MAP_FAILED)
     return make_error_tuple(env, errno);
 
-  if (fd >= 0)
-    close(fd);
-
   auto handle = (mhandle*)enif_alloc_resource(MMAP_RESOURCE, sizeof(mhandle));
 
   if (!handle) {
     int err = errno;
     munmap(res, size);
+    if (fd >= 0) close(fd);
     char buf[256];
     snprintf(buf, sizeof(buf), "Cannot allocate resource: %s\n", strerror_compat(err));
     return make_error_tuple(env, buf);
   }
 
-  new (handle) mhandle(res, path, size, direct, fixed_size, max_inc_size, auto_unlink, prot, lock, dbg);
+  new (handle) mhandle(res, path, fd, size, direct, fixed_size, max_inc_size, auto_unlink, prot, lock, dbg);
   ERL_NIF_TERM resource = enif_make_resource(env, handle);
   enif_release_resource(handle);
 
@@ -580,8 +581,10 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
   ERL_NIF_TERM vals[] = {exists ? ATOM_TRUE : ATOM_FALSE, enif_make_ulong(env, size)};
 
   ERL_NIF_TERM map;
-  if (!enif_make_map_from_arrays(env, keys, vals, 2, &map))
+  if (!enif_make_map_from_arrays(env, keys, vals, 2, &map)) {
+    if (fd >= 0) close(fd);
     return make_error_tuple(env, ATOM_CANNOT_CREATE_MAP);
+  }
 
   debug(handle, "Created memory map %p of size %lu (%s)\r\n", res, size, path);
 
@@ -596,6 +599,7 @@ static ERL_NIF_TERM emmap_close(ErlNifEnv* env, int argc, const ERL_NIF_TERM arg
 
   RW_LOCK;
   bool res = handle->unmap(false);
+  if (handle->fd >= 0) close(handle->fd);
   RW_UNLOCK;
 
   return res ? ATOM_OK : make_error_tuple(env, errno);
@@ -670,6 +674,16 @@ static int resize(mhandle* handle, unsigned long& new_size) {
   void* addr = mremap(handle->mem, handle->len, new_size, MREMAP_MAYMOVE);
   if (addr == (void*)-1)
     return -1;
+
+  if (handle->fd >= 0) {
+    if (ftruncate(handle->fd, new_size) < 0) {
+      debug(handle->dbg, "ftruncate: %s\r\n", strerror_compat(errno));
+      close(handle->fd);
+      handle->fd = -1;
+      return -1;
+    } else
+      debug(handle->dbg, "File %s resized to %d bytes\r\n", handle->path, new_size);
+  }
 
   handle->mem = addr;
   handle->len = new_size;
@@ -1165,7 +1179,7 @@ static ERL_NIF_TERM emmap_position(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
     return make_error_tuple(env, err); \
   } \
   debug(handle, "Resized memory map to %lu bytes\r\n", handle->len); \
-  debug(handle, "New memory range %p ... %p\r\n", handle->mem, handle->mem + handle->len); \
+  debug(handle, "New memory range %p ... %p\r\n", handle->mem, (char *)handle->mem + handle->len); \
 } while (false)
 #endif
 
