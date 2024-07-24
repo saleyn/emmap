@@ -12,6 +12,10 @@
 -export([inc_counter/2, inc_counter/3, dec_counter/2, dec_counter/3]).
 -export([set_counter/3, read_counter/2]).
 
+-export([
+    init_block_storage/2, store_block/2
+]).
+
 -export_type([resource/0, mmap_file/0, open_option/0, open_extra_info/0]).
 
 -on_load(init/0).
@@ -460,7 +464,36 @@ read_counter({MFile, NumCnts}, CounterNum)
 nvl(undefined, V) -> V;
 nvl(V,         _) -> V.
 
+%% @doc Initialize fixed-size block storage in the shared memory.
+-spec init_block_storage(File::mmap_file(), BlockSize::pos_integer()) -> ok | {error, atom()|string()}.
+init_block_storage(#file_descriptor{module=?MODULE, data=Mem}, BlockSize) when is_integer(BlockSize) ->
+    init_bs_nif(Mem, BlockSize).
+
+init_bs_nif(_,_) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+
+%% @doc Store data block
+-spec store_block(File::mmap_file(), Data::binary()) -> ok | {error, atom()|string()}.
+store_block(#file_descriptor{module=?MODULE, data=Mem}, Data) when is_binary(Data) ->
+    store_blk_nif(Mem, Data).
+
+store_blk_nif(_,_) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+
 -ifdef(EUNIT).
+
+block_storage_test() ->
+    {ok, MFile, #{size := 8}} = emmap:open("storage.bin", 0, 8, [create, write, shared, debug]),
+    ok = emmap:init_block_storage(MFile, 8),
+    write_n_blocks(100, MFile, 8),
+    ok = emmap:flush(MFile),
+    ok.
+
+write_n_blocks(0, _, _) -> ok;
+write_n_blocks(N, MFile, Size) ->
+    {ok, Addr} = emmap:store_block(MFile, rand:bytes(Size)),
+    io:format(user, "addr: ~p~n", [Addr]),
+    write_n_blocks(N - 1, MFile, Size).
 
 simple_test() ->
     {ok, File} = file:open("test.data", [raw, write]),

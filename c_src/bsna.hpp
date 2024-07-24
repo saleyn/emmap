@@ -42,9 +42,19 @@ inline void *pointer(void *mem, int addr, size_t bs) {
 template<>
 inline void *pointer<0>(void *mem, int, size_t) { return mem; }
 
+static inline
+uint64_t& get_mask(void* mem, void*& last) {
+  // initialize mask if not yet done
+  if (mem > last) {
+    *(uint64_t*)mem = 0xffff'ffff'ffff'ffff;
+    last = mem;
+  }
+  return *(uint64_t *)mem;
+}
+
 template<int N>
-int alloc(void *mem, void *end, size_t bs) {
-  uint64_t& mask = *(uint64_t *)mem;
+int alloc(void *mem, void*& last, void *end, size_t bs) {
+  uint64_t& mask = get_mask(mem, last);
 
   while (true) {
     // find group that not yet filled (marked by 1)
@@ -57,7 +67,7 @@ int alloc(void *mem, void *end, size_t bs) {
     if (p + 8 > end) return -2;
 
     // find subgroup or free block
-    int m = alloc<N-1>(p, end, bs);
+    int m = alloc<N-1>(p, last, end, bs);
     if (m < -1) return m;
 
     if (m < 0 || m == 63) {
@@ -74,8 +84,8 @@ int alloc(void *mem, void *end, size_t bs) {
 }
 
 template<>
-int alloc<1>(void *mem, void *end, size_t bs) {
-  uint64_t& mask = *(uint64_t *)mem;
+int alloc<1>(void *mem, void*& last, void *end, size_t bs) {
+  uint64_t& mask = get_mask(mem, last);
 
   int n = __builtin_ffsll(mask) - 1;
   if (n < 0)
@@ -90,8 +100,8 @@ int alloc<1>(void *mem, void *end, size_t bs) {
 }
 
 template<int N>
-int store_(void *mem, void *end, const ErlNifBinary& bin, size_t bs) {
-  int n = alloc<N>(mem, end, bs);
+int store(void *mem, void*& last, void *end, const ErlNifBinary& bin, size_t bs) {
+  int n = alloc<N>(mem, last, end, bs);
   if (n < 0) return n;
   memcpy(pointer<N>(mem, n, bs), bin.data, bin.size);
   return n;
@@ -101,14 +111,17 @@ int store_(void *mem, void *end, const ErlNifBinary& bin, size_t bs) {
 
 struct bs_head {
   uint32_t block_size;
-  uint64_t mask;
+  ssize_t limo; // Last Initialized Mask Offset
 
   void init(unsigned block_size_) {
     block_size = block_size_;
-    mask = 0xffff'ffff'ffff'ffff;
+    limo = -1;
   }
 
   int store(void *mem, void *end, const ErlNifBinary& bin) {
-    return store_<BS_LEVELS>(mem, end, bin, block_size);
+    void *last = (char *)mem + limo;
+    int ret = ::store<BS_LEVELS>(mem, last, end, bin, block_size);
+    limo = (char *)last - (char *)mem;
+    return ret;
   }
 };

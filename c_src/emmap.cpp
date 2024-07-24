@@ -142,6 +142,14 @@ void emmap_dtor(ErlNifEnv* env, void* arg)
 #define R_UNLOCK  if (handle->rwlock != 0) enif_rwlock_runlock(handle->rwlock)
 #define R_LOCK    if (handle->rwlock != 0) enif_rwlock_rlock(handle->rwlock)
 
+struct rw_lock {
+  rw_lock(mhandle* h) : lock(h->rwlock) { if (lock != 0) enif_rwlock_rwlock(lock); }
+  rw_lock(const rw_lock&) = delete;
+  rw_lock& operator=(const rw_lock&) = delete;
+  ~rw_lock() { if (lock != 0) enif_rwlock_rwunlock(lock); }
+  ErlNifRWLock* lock;
+};
+
 static ERL_NIF_TERM ATOM_ADDRESS;
 static ERL_NIF_TERM ATOM_ALIGNMENT;
 static ERL_NIF_TERM ATOM_ANON;
@@ -239,10 +247,10 @@ extern "C" {
     {"read_nif",              2, emmap_read},
     {"read_line_nif",         1, emmap_read_line},
     {"init_bs_nif",           2, emmap_init_bs},
-    {"read_blk_nif",          1, emmap_read_blk},
-    {"take_blk_nif",          1, emmap_take_blk},
-    {"store_blk_nif",         1, emmap_store_blk},
-    {"free_blk_nif",          1, emmap_free_blk},
+    // {"read_blk_nif",          1, emmap_read_blk},
+    // {"take_blk_nif",          1, emmap_take_blk},
+    {"store_blk_nif",         2, emmap_store_blk},
+    // {"free_blk_nif",          1, emmap_free_blk},
   };
 
 };
@@ -653,6 +661,27 @@ static ERL_NIF_TERM emmap_pread(ErlNifEnv* env, int argc, const ERL_NIF_TERM arg
   return enif_make_tuple2(env, ATOM_OK, res);
 }
 
+#ifndef __APPLE__
+static int resize(mhandle* handle, unsigned long& new_size) {
+  if (new_size == 0)
+    new_size = handle->len < handle->max_inc_size
+             ? handle->len * 2 : handle->len + handle->max_inc_size;
+
+  void* addr = mremap(handle->mem, handle->len, new_size, MREMAP_MAYMOVE);
+  if (addr == (void*)-1)
+    return -1;
+
+  handle->mem = addr;
+  handle->len = new_size;
+  return 0;
+}
+
+static int resize(mhandle* handle) {
+  unsigned long new_size = 0;
+  return resize(handle, new_size);
+}
+#endif
+
 static ERL_NIF_TERM emmap_resize(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
   unsigned long new_size;
@@ -688,22 +717,6 @@ static ERL_NIF_TERM emmap_resize(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
   return enif_make_tuple2(env, ATOM_OK, enif_make_ulong(env, new_size));
 #endif
 }
-
-#ifndef __APPLE__
-int resize(mhandle* handle, unsigned long& new_size) {
-  if (new_size == 0)
-    new_size = handle->len < handle->max_inc_size
-             ? handle->len * 2 : handle->len + handle->max_inc_size;
-
-  void* addr = mremap(handle->mem, handle->len, new_size, MREMAP_MAYMOVE);
-  if (addr == (void*)-1)
-    return -1;
-
-  handle->mem = addr;
-  handle->len = new_size;
-  return 0;
-}
-#endif
 
 static ERL_NIF_TERM emmap_pwrite(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
@@ -1141,6 +1154,20 @@ static ERL_NIF_TERM emmap_position(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
   return enif_make_tuple2(env, ATOM_OK, enif_make_ulong(env, position));
 }
 
+#ifdef __APPLE__
+#define RESIZE(env, handle) return make_error(env, ATOM_FIXED_SIZE)
+#else
+#define RESIZE(env, handle) do { \
+  if (handle->fixed_size) \
+    return make_error(env, ATOM_FIXED_SIZE); \
+  if (resize(handle) < 0) { \
+    const char* err = strerror_compat(errno); \
+    return make_error_tuple(env, err); \
+  } \
+  debug(handle, "Resized memory map to %lu bytes\r\n", handle->len); \
+} while (false)
+#endif
+
 // init fixed-size blocks storage
 static ERL_NIF_TERM emmap_init_bs(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
@@ -1149,23 +1176,21 @@ static ERL_NIF_TERM emmap_init_bs(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
   if (argc!=2
       || !enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
       || !enif_get_ulong(env, argv[1], &block_size)
-      || sizeof(bs_head) > handle->len
       )
     return enif_make_badarg(env);
 
-  if ((handle->prot & PROT_WRITE) == 0) {
+  if ((handle->prot & PROT_WRITE) == 0)
     return make_error(env, ATOM_EACCES);
-  }
 
-  RW_LOCK;
-  if (handle->closed()) {
-    RW_UNLOCK;
+  rw_lock lock(handle);
+
+  if (handle->closed())
     return make_error(env, ATOM_CLOSED);
-  }
+
+  while (sizeof(bs_head) > handle->len) RESIZE(env, handle);
 
   bs_head& hdr = *(bs_head*)handle->mem;
   hdr.init(block_size);
-  RW_UNLOCK;
 
   return ATOM_OK;
 }
@@ -1191,51 +1216,28 @@ static ERL_NIF_TERM emmap_store_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM
       )
     return enif_make_badarg(env);
 
-  if ((handle->prot & PROT_WRITE) == 0) {
+  if ((handle->prot & PROT_WRITE) == 0)
     return make_error(env, ATOM_EACCES);
-  }
 
-  RW_LOCK;
-  if (handle->closed()) {
-    RW_UNLOCK;
+  rw_lock lock(handle);
+
+  if (handle->closed())
     return make_error(env, ATOM_CLOSED);
-  }
 
   bs_head& hdr = *(bs_head*)handle->mem;
   char *mem = (char *)handle->mem;
 
   char *start = mem + sizeof(bs_head);
-  char *stop = mem + handle->len;
 
-  while (true) {
-    switch (hdr.store(start, stop, bin)) {
-    case 0:
-      break;
-
-    case -1:
+  int addr;
+  while ((addr = hdr.store(start, mem + handle->len, bin)) < 0) {
+    if (addr < -1)
+      RESIZE(env, handle);
+    else
       return make_error_tuple(env, "exhausted");
-
-    case -2:
-      if (handle->fixed_size)
-        return make_error(env, ATOM_FIXED_SIZE);
-#ifdef __APPLE__
-      return make_error(env, ATOM_FIXED_SIZE);
-#else
-      if (resize(handle, new_size) < 0) {
-        const char* err = strerror_compat(errno);
-        RW_UNLOCK;
-        return make_error_tuple(env, err);
-      }
-      continue;
-#endif
-    }
-
-    break;
   }
 
-  RW_UNLOCK;
-
-  return ATOM_OK;
+  return enif_make_tuple2(env, ATOM_OK, enif_make_ulong(env, addr));
 }
 
 static ERL_NIF_TERM emmap_free_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
