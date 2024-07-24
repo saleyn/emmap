@@ -16,7 +16,7 @@
 #endif
 
 #ifndef BS_LEVELS
-#define BS_LEVELS 3
+#define BS_LEVELS 1
 #endif
 
 namespace {
@@ -72,7 +72,7 @@ int alloc(void *mem, void*& last, void *end, size_t bs) {
 
     if (m < 0 || m == 63) {
       // ensure mask bit cleared to mark group filled
-      mask &= ~(1 << n);
+      mask &= ~(1ul << n);
 
       // try another group
       if (m < 0) continue;
@@ -95,7 +95,7 @@ int alloc<1>(void *mem, void*& last, void *end, size_t bs) {
   char *p = ptr<1>(mem, n, bs);
   if (p + bs > end) return -2;
 
-  mask ^= (1 << n);
+  mask ^= (1ul << n);
   return n;
 }
 
