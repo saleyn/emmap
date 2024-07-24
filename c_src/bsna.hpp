@@ -46,8 +46,9 @@ static inline
 uint64_t& get_mask(void* mem, void*& last) {
   // initialize mask if not yet done
   if (mem > last) {
-    fprintf(stderr, "%d> write at 0x%p\r\n", __LINE__, mem);
+    fprintf(stderr, "%d> write at %p\r\n", __LINE__, mem);
     *(uint64_t*)mem = 0xffff'ffff'ffff'ffff;
+    fprintf(stderr, "%d> write at %p done\r\n", __LINE__, mem);
     last = mem;
   }
   return *(uint64_t *)mem;
@@ -61,7 +62,7 @@ int alloc(void *mem, void*& last, void *end, size_t bs) {
 
   while (true) {
     // find group that not yet filled (marked by 1)
-    fprintf(stderr, "%d> read at 0x%p\r\n", __LINE__, &mask);
+    fprintf(stderr, "%d> read at %p\r\n", __LINE__, &mask);
     int n = __builtin_ffsll(mask) - 1;
     if (n < 0) return -1;
 
@@ -74,7 +75,7 @@ int alloc(void *mem, void*& last, void *end, size_t bs) {
 
     if (m < 0) {
       // ensure mask bit cleared to mark group filled
-      fprintf(stderr, "%d> read-write at 0x%p\r\n", __LINE__, &mask);
+      fprintf(stderr, "%d> read-write at %p\r\n", __LINE__, &mask);
       mask &= ~(1ul << n);
 
       // try another group
@@ -92,7 +93,7 @@ int alloc<1>(void *mem, void*& last, void *end, size_t bs) {
   assert((char *)mem + 8 <= end);
   uint64_t& mask = get_mask(mem, last);
 
-  fprintf(stderr, "%d> read at 0x%p\r\n", __LINE__, &mask);
+  fprintf(stderr, "%d> read at %p\r\n", __LINE__, &mask);
   int n = __builtin_ffsll(mask) - 1;
   if (n < 0) return -1;
 
@@ -100,7 +101,7 @@ int alloc<1>(void *mem, void*& last, void *end, size_t bs) {
   char *p = ptr<1>(mem, n, bs);
   if (p + bs > end) return -2;
 
-  fprintf(stderr, "%d> read-write at 0x%p\r\n", __LINE__, &mask);
+  fprintf(stderr, "%d> read-write at %p\r\n", __LINE__, &mask);
   mask ^= (1ul << n);
   return n;
 }
@@ -120,8 +121,8 @@ int store(void *mem, void*& last, void *end, const ErlNifBinary& bin, size_t bs)
 }
 
 struct bs_head {
-  uint32_t block_size;
-  ssize_t limo; // Last Initialized Mask Offset
+  uint64_t block_size;
+  int64_t limo; // Last Initialized Mask Offset
 
   void init(unsigned block_size_) {
     block_size = block_size_;
