@@ -485,14 +485,14 @@ store_blk_nif(_,_) ->
 block_storage_test() ->
     {ok, MFile, #{size := 8}} = emmap:open("storage.bin", 0, 8, [create, write, shared, debug]),
     ok = emmap:init_block_storage(MFile, 8),
-    write_n_blocks(100, MFile, 8),
+    write_n_blocks(4095, MFile, 8),
     ok = emmap:flush(MFile),
     ok.
 
 write_n_blocks(0, _, _) -> ok;
 write_n_blocks(N, MFile, Size) ->
-    {ok, Addr} = emmap:store_block(MFile, rand:bytes(Size)),
-    io:format(user, "addr: ~p~n", [Addr]),
+    {ok, _Addr} = emmap:store_block(MFile, rand:bytes(Size)),
+    % io:format(user, "addr: ~p~n", [Addr]),
     write_n_blocks(N - 1, MFile, Size).
 
 simple_test() ->

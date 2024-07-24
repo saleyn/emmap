@@ -219,10 +219,10 @@ static ERL_NIF_TERM emmap_patomic_write_int(ErlNifEnv*, int argc, const ERL_NIF_
 
 // fixed-size blocks storage operations
 static ERL_NIF_TERM emmap_init_bs(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_read_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_take_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+// static ERL_NIF_TERM emmap_read_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+// static ERL_NIF_TERM emmap_take_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM emmap_store_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM emmap_free_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+// static ERL_NIF_TERM emmap_free_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 
 extern "C" {
 
@@ -1165,6 +1165,7 @@ static ERL_NIF_TERM emmap_position(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
     return make_error_tuple(env, err); \
   } \
   debug(handle, "Resized memory map to %lu bytes\r\n", handle->len); \
+  debug(handle, "New memory range %p ... %p\r\n", handle->mem, handle->mem + handle->len); \
 } while (false)
 #endif
 
@@ -1195,7 +1196,7 @@ static ERL_NIF_TERM emmap_init_bs(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
   return ATOM_OK;
 }
 
-static ERL_NIF_TERM emmap_read_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+/* static ERL_NIF_TERM emmap_read_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
   return ATOM_ERROR;
 }
@@ -1203,6 +1204,14 @@ static ERL_NIF_TERM emmap_read_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
 static ERL_NIF_TERM emmap_take_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
   return ATOM_ERROR;
+} */
+
+static inline int store_block(mhandle *handle, ErlNifBinary& bin) {
+  bs_head& hdr = *(bs_head*)handle->mem;
+  char *mem = (char *)handle->mem;
+  void *start = mem + sizeof(bs_head);
+  void *stop = mem + handle->len;
+  return hdr.store(start, stop, bin);
 }
 
 static ERL_NIF_TERM emmap_store_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
@@ -1224,13 +1233,8 @@ static ERL_NIF_TERM emmap_store_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM
   if (handle->closed())
     return make_error(env, ATOM_CLOSED);
 
-  bs_head& hdr = *(bs_head*)handle->mem;
-  char *mem = (char *)handle->mem;
-
-  char *start = mem + sizeof(bs_head);
-
   int addr;
-  while ((addr = hdr.store(start, mem + handle->len, bin)) < 0) {
+  while ((addr = store_block(handle, bin)) < 0) {
     if (addr < -1)
       RESIZE(env, handle);
     else
@@ -1240,7 +1244,7 @@ static ERL_NIF_TERM emmap_store_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM
   return enif_make_tuple2(env, ATOM_OK, enif_make_ulong(env, addr));
 }
 
-static ERL_NIF_TERM emmap_free_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+/* static ERL_NIF_TERM emmap_free_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
   return ATOM_ERROR;
-}
+} */

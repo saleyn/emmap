@@ -16,7 +16,7 @@
 #endif
 
 #ifndef BS_LEVELS
-#define BS_LEVELS 1
+#define BS_LEVELS 2
 #endif
 
 namespace {
@@ -46,6 +46,7 @@ static inline
 uint64_t& get_mask(void* mem, void*& last) {
   // initialize mask if not yet done
   if (mem > last) {
+    fprintf(stderr, "%d> write at 0x%p\r\n", __LINE__, mem);
     *(uint64_t*)mem = 0xffff'ffff'ffff'ffff;
     last = mem;
   }
@@ -54,28 +55,30 @@ uint64_t& get_mask(void* mem, void*& last) {
 
 template<int N>
 int alloc(void *mem, void*& last, void *end, size_t bs) {
+  if ((char *)mem + 8 > end) return -2;
+  assert((char *)mem + 8 <= end);
   uint64_t& mask = get_mask(mem, last);
 
   while (true) {
     // find group that not yet filled (marked by 1)
+    fprintf(stderr, "%d> read at 0x%p\r\n", __LINE__, &mask);
     int n = __builtin_ffsll(mask) - 1;
-    if (n < 0)
-      return -1;
+    if (n < 0) return -1;
 
     // pointer to the group mask
     char *p = ptr<N>(mem, n, bs);
-    if (p + 8 > end) return -2;
 
     // find subgroup or free block
     int m = alloc<N-1>(p, last, end, bs);
     if (m < -1) return m;
 
-    if (m < 0 || m == 63) {
+    if (m < 0) {
       // ensure mask bit cleared to mark group filled
+      fprintf(stderr, "%d> read-write at 0x%p\r\n", __LINE__, &mask);
       mask &= ~(1ul << n);
 
       // try another group
-      if (m < 0) continue;
+      continue;
     }
 
     // return index
@@ -85,16 +88,19 @@ int alloc(void *mem, void*& last, void *end, size_t bs) {
 
 template<>
 int alloc<1>(void *mem, void*& last, void *end, size_t bs) {
+  if ((char *)mem + 8 > end) return -2;
+  assert((char *)mem + 8 <= end);
   uint64_t& mask = get_mask(mem, last);
 
+  fprintf(stderr, "%d> read at 0x%p\r\n", __LINE__, &mask);
   int n = __builtin_ffsll(mask) - 1;
-  if (n < 0)
-    return -1;
+  if (n < 0) return -1;
 
   // pointer to the data block
   char *p = ptr<1>(mem, n, bs);
   if (p + bs > end) return -2;
 
+  fprintf(stderr, "%d> read-write at 0x%p\r\n", __LINE__, &mask);
   mask ^= (1ul << n);
   return n;
 }
@@ -103,7 +109,11 @@ template<int N>
 int store(void *mem, void*& last, void *end, const ErlNifBinary& bin, size_t bs) {
   int n = alloc<N>(mem, last, end, bs);
   if (n < 0) return n;
-  memcpy(pointer<N>(mem, n, bs), bin.data, bin.size);
+  assert(bs == bin.size);
+  void *p = pointer<N>(mem, n, bs);
+  assert((char *)p + bin.size <= end);
+  // memcpy(p, bin.data, bin.size);
+  // memcpy(pointer<N>(mem, n, bs), bin.data, bin.size);
   return n;
 }
 
