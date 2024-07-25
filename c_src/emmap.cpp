@@ -575,7 +575,6 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
   if (!handle) {
     int err = errno;
     munmap(res, size);
-    if (fd >= 0) close(fd);
     char buf[256];
     snprintf(buf, sizeof(buf), "Cannot allocate resource: %s\n", strerror_compat(err));
     return make_error_tuple(env, buf);
@@ -589,10 +588,8 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
   ERL_NIF_TERM vals[] = {exists ? ATOM_TRUE : ATOM_FALSE, enif_make_ulong(env, size)};
 
   ERL_NIF_TERM map;
-  if (!enif_make_map_from_arrays(env, keys, vals, 2, &map)) {
-    if (fd >= 0) close(fd);
+  if (!enif_make_map_from_arrays(env, keys, vals, 2, &map))
     return make_error_tuple(env, ATOM_CANNOT_CREATE_MAP);
-  }
 
   debug(handle, "Created memory map %p of size %lu (%s)\r\n", res, size, path);
 
@@ -607,7 +604,6 @@ static ERL_NIF_TERM emmap_close(ErlNifEnv* env, int argc, const ERL_NIF_TERM arg
 
   RW_LOCK;
   bool res = handle->unmap(false);
-  if (handle->fd >= 0) close(handle->fd);
   RW_UNLOCK;
 
   return res ? ATOM_OK : make_error_tuple(env, errno);
@@ -674,24 +670,31 @@ static ERL_NIF_TERM emmap_pread(ErlNifEnv* env, int argc, const ERL_NIF_TERM arg
 }
 
 #ifndef __APPLE__
+static bool resize_file(mhandle* handle, size_t new_size) {
+  if (handle->fd >= 0) {
+    if (ftruncate(handle->fd, new_size) < 0) {
+      debug(handle->dbg, "ftruncate: %s\r\n", strerror_compat(errno));
+      return false;
+    }
+    debug(handle->dbg, "File %s resized to %d bytes\r\n", handle->path, new_size);
+  }
+  return true;
+}
+
 static int resize(mhandle* handle, unsigned long& new_size) {
   if (new_size == 0)
     new_size = handle->len < handle->max_inc_size
              ? handle->len * 2 : handle->len + handle->max_inc_size;
 
+  if (new_size > handle->len && !resize_file(handle, new_size))
+    return -1;
+
   void* addr = mremap(handle->mem, handle->len, new_size, MREMAP_MAYMOVE);
   if (addr == (void*)-1)
     return -1;
 
-  if (handle->fd >= 0) {
-    if (ftruncate(handle->fd, new_size) < 0) {
-      debug(handle->dbg, "ftruncate: %s\r\n", strerror_compat(errno));
-      close(handle->fd);
-      handle->fd = -1;
-      return -1;
-    } else
-      debug(handle->dbg, "File %s resized to %d bytes\r\n", handle->path, new_size);
-  }
+  if (new_size < handle->len && !resize_file(handle, new_size))
+    return -1;
 
   handle->mem = addr;
   handle->len = new_size;
