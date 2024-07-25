@@ -16,7 +16,7 @@
 #endif
 
 #ifndef BS_LEVELS
-#define BS_LEVELS 2
+#define BS_LEVELS 3
 #endif
 
 namespace {
@@ -122,5 +122,13 @@ struct bs_head {
     int ret = ::store<BS_LEVELS>(mem, last, end, bin, block_size);
     limo = (char *)last - (char *)mem;
     return ret;
+  }
+
+  template<typename T>
+  bool read(void *mem, void *end, int addr, T consumer) {
+    void *ptr = pointer<BS_LEVELS>(mem, addr, block_size);
+    if ((char *)ptr + block_size > end) return false;
+    consumer(ptr, block_size);
+    return true;
   }
 };

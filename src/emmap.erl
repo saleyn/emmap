@@ -13,7 +13,7 @@
 -export([set_counter/3, read_counter/2]).
 
 -export([
-    init_block_storage/2, store_block/2
+    init_block_storage/2, store_block/2, read_block/2
 ]).
 
 -export_type([resource/0, mmap_file/0, open_option/0, open_extra_info/0]).
@@ -473,26 +473,41 @@ init_bs_nif(_,_) ->
     erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Store data block
--spec store_block(File::mmap_file(), Data::binary()) -> ok | {error, atom()|string()}.
+-spec store_block(File::mmap_file(), Data::binary()) -> Addr::non_neg_integer() | {error, atom()|string()}.
 store_block(#file_descriptor{module=?MODULE, data=Mem}, Data) when is_binary(Data) ->
     store_blk_nif(Mem, Data).
 
 store_blk_nif(_,_) ->
     erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
+%% @doc Read data block
+-spec read_block(File::mmap_file(), Addr::non_neg_integer()) -> Data::binary() | eof | {error, atom()|string()}.
+read_block(#file_descriptor{module=?MODULE, data=Mem}, Addr) when is_integer(Addr), Addr >= 0 ->
+    read_blk_nif(Mem, Addr).
+
+read_blk_nif(_,_) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+
 -ifdef(EUNIT).
 
 block_storage_test() ->
-    {ok, MFile, #{size := 8}} = emmap:open("storage.bin", 0, 8, [create, write, shared, debug]),
+    {ok, MFile, #{size := 8}} = emmap:open("storage.bin", 0, 8, [create, write, shared]),
     ok = emmap:init_block_storage(MFile, 8),
-    write_n_blocks(4095, MFile, 8),
+    write_n_blocks(4096, MFile, 8),
     ok = emmap:flush(MFile),
     ok.
 
 write_n_blocks(0, _, _) -> ok;
 write_n_blocks(N, MFile, Size) ->
-    {ok, _Addr} = emmap:store_block(MFile, rand:bytes(Size)),
+    Bytes1 = rand:bytes(Size),
+
+    Addr = emmap:store_block(MFile, Bytes1),
+    ?assert(is_integer(Addr) andalso Addr >= 0),
     % io:format(user, "addr: ~p~n", [Addr]),
+
+    Bytes2 = emmap:read_block(MFile, Addr),
+    ?assertMatch(Bytes1, Bytes2),
+
     write_n_blocks(N - 1, MFile, Size).
 
 simple_test() ->
