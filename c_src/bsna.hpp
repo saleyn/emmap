@@ -21,25 +21,54 @@
 
 namespace {
 
-// calculate block size at given level
+const uint64_t filled = 0xffff'ffff'ffff'ffff;
+const uint64_t vacant = 0x0000'0000'0000'0000;
+
+static inline uint64_t& free_mask(void *mem) { return ((uint64_t*)mem)[0]; }
+static inline uint64_t& used_mask(void *mem) { return ((uint64_t*)mem)[1]; }
+
 template<int N>
-inline size_t block_size(size_t bs, int n = 64) {
-  return 8 + n * block_size<N-1>(bs);
+inline bool not_used(void *mem) { return used_mask(mem) == vacant; }
+template<>
+inline bool not_used<1>(void *mem) { return free_mask(mem) == filled; }
+
+static inline void maybe_init_mask(void* mem, void*& last) {
+  // initialize ground level mask if not yet done
+  if (mem > last) {
+    free_mask(mem) = filled;
+    last = mem;
+  }
 }
 
+static inline void maybe_init_masks(void* mem, void*& last) {
+  // initialize masks if not yet done
+  if (mem > last) {
+    free_mask(mem) = filled;
+    used_mask(mem) = vacant;
+    last = mem;
+  }
+}
+
+template<int> inline size_t mask_len() { return 16; }
+template<> inline size_t mask_len<1>() { return 8; }
+
+// calculate block size at given level
+// all levels excepting ground carry two 8-byte masks:
+// free blocks and allocated blocks masks
+template<int N>
+inline size_t block_size(size_t bs, int n = 64) {
+  return mask_len<N>() + n * block_size<N-1>(bs);
+}
+
+// ground level carry onle "available" mask
 template<>
-inline size_t block_size<0>(size_t bs, int) { return bs; }
+inline size_t block_size<1>(size_t bs, int n) {
+  return mask_len<1>() + n * bs;
+}
 
 // translate address to pointer
 template<int N>
 inline char *ptr(void *mem, int n, size_t bs) {
-  return (char *)mem + block_size<N>(bs, n);
-}
-
-// translate address to pointer to an existing block
-template<int N>
-inline char *real_ptr(void *mem, int n, size_t bs) {
-  // if (N == 1 && (*(uint64_t *)mem & (1ul << n)) != 0) return nullptr;
   return (char *)mem + block_size<N>(bs, n);
 }
 
@@ -52,76 +81,126 @@ inline void *pointer(void *mem, int addr, size_t bs) {
 template<>
 inline void *pointer<0>(void *mem, int, size_t) { return mem; }
 
+struct limits {
+  size_t bs;
+  void *end;
+  void *last;
+
+  limits(size_t b, void *e, void *l) : bs(b), end(e), last(l) {}
+
+  template<int N>
+  bool mask_over(const void *ptr) const {
+    return (char *)ptr + mask_len<N>() > end;
+  }
+
+  template<int N>
+  bool mask_undef(const void *ptr) const {
+    return ptr > last || (char *)ptr + mask_len<N>() > end;
+  }
+
+  bool data_over(const void *ptr) const {
+    return (char *)ptr + bs > end;
+  }
+};
+
 // translate address to pointer to an existing block
 template<int N>
-inline void *real_pointer(void *mem, int addr, size_t bs, void *end, void *last) {
-  if (mem > last || (char *)mem + 8 > end) return nullptr;
-  void *p = real_ptr<N>(mem, addr % 64, bs);
-  return (p != nullptr) ? real_pointer<N-1>(p, addr / 64, bs, end, last) : p;
+inline void *real_pointer(void *mem, int addr, const limits& lim) {
+  if (lim.mask_undef<N>(mem)) return nullptr;
+  void *p = ptr<N>(mem, addr % 64, lim.bs);
+  return real_pointer<N-1>(p, addr / 64, lim);
 }
 
 template<>
-inline void *real_pointer<0>(void *mem, int, size_t, void *end, void *last) {
-  return (char *)mem + 8 > end ? nullptr : mem;
-}
-
-// release block mask bit at given level
-template<int N>
-inline bool free_blk(void *mem, int n, size_t bs) {
-  uint64_t bit = 1ul << n;
-  if (N == 1 && (*(uint64_t *)mem & bit) != 0) return false;
-  *(uint64_t *)mem |= bit;
-  return true;
+inline void *real_pointer<1>(void *mem, int addr, const limits& lim) {
+  if (lim.mask_undef<1>(mem)) return nullptr;
+  int n = addr % 64;
+  // attempt to access unallocated block?
+  if ((free_mask(mem) & (1ul << n)) != vacant) return nullptr;
+  void *p = ptr<1>(mem, n, lim.bs);
+  return lim.data_over(p) ? nullptr : p;
 }
 
 // free block
 template<int N>
-inline bool free_block(void *mem, int addr, size_t bs, void *end, void *last) {
-  if (mem > last || (char *)mem + 8 > end) return false;
+inline bool free_block(void *mem, int addr, const limits& lim) {
+  // bit
   int n = addr % 64;
-  void *p = real_ptr<N>(mem, n, bs);
-  bool ret1 = p ? free_block<N-1>(p, addr / 64, bs, end, last) : false;
-  bool ret2 = free_blk<N>(mem, n, bs);
-  return ret1 && ret2;
+  uint64_t bit = 1ul << n;
+  bool ret;
+
+  // next level pointer
+  void *p = ptr<N>(mem, n, lim.bs);
+  if (lim.mask_undef<N-1>(p)) {
+    ret = false;
+
+    // clear presence mask
+    used_mask(mem) &= ~bit;
+  }
+  else {
+    ret = free_block<N-1>(p, addr / 64, lim);
+
+    // clear presence mask if next level got empty
+    if (not_used<N-1>(p)) used_mask(mem) &= ~bit;
+  }
+
+  // mark block free
+  free_mask(mem) |= bit;
+
+  return ret;
 }
 
+// free block
 template<>
-inline bool free_block<0>(void *, int, size_t, void *, void *) { return true; }
+inline bool free_block<1>(void *mem, int addr, const limits&) {
+  // bit
+  int n = addr % 64;
+  uint64_t bit = 1ul << n;
 
-static inline
-uint64_t& get_mask(void* mem, void*& last) {
-  // initialize mask if not yet done
-  if (mem > last) {
-    *(uint64_t*)mem = 0xffff'ffff'ffff'ffff;
-    last = mem;
-  }
-  return *(uint64_t *)mem;
+  // attempt to free unallocated block?
+  if ((free_mask(mem) & bit) != vacant) return false;
+
+  // mark block free
+  free_mask(mem) |= bit;
+
+  return true;
 }
 
 template<int N>
-int alloc(void *mem, void*& last, void *end, size_t bs) {
-  if ((char *)mem + 8 > end) return -2;
-  uint64_t& mask = get_mask(mem, last);
+int alloc(void *mem, limits& lim) {
+  if (lim.mask_over<N>(mem)) return -2;
+  maybe_init_masks(mem, lim.last);
+  uint64_t& free_bits = free_mask(mem);
 
   while (true) {
     // find group that not yet filled (marked by 1)
-    int n = __builtin_ffsll(mask) - 1;
+    int n = __builtin_ffsll(free_bits) - 1;
     if (n < 0) return -1;
 
     // pointer to the group mask
-    char *p = ptr<N>(mem, n, bs);
+    char *p = ptr<N>(mem, n, lim.bs);
 
     // find subgroup or free block
-    int m = alloc<N-1>(p, last, end, bs);
+    int m = alloc<N-1>(p, lim);
     if (m < -1) return m;
 
+    // n-th bit
+    uint64_t bit = 1ul << n;
+
     if (m < 0) {
-      // ensure mask bit cleared to mark group filled
-      mask ^= 1ul << n;
+      // ensure free mask bit cleared to mark group filled
+      free_bits ^= bit;
 
       // try another group
       continue;
     }
+
+    // if group is filled, clear free mask bit
+    if (*(uint64_t *)p == 0)
+      free_bits ^= bit;
+
+    // ensure used mask bit is set
+    used_mask(mem) |= bit;
 
     // return index
     return m * 64 + n;
@@ -129,26 +208,30 @@ int alloc(void *mem, void*& last, void *end, size_t bs) {
 }
 
 template<>
-int alloc<1>(void *mem, void*& last, void *end, size_t bs) {
-  if ((char *)mem + 8 > end) return -2;
-  uint64_t& mask = get_mask(mem, last);
+int alloc<1>(void *mem, limits& lim) {
+  if (lim.mask_over<1>(mem)) return -2;
+  maybe_init_mask(mem, lim.last);
+  uint64_t& free_bits = free_mask(mem);
 
-  int n = __builtin_ffsll(mask) - 1;
+  // find block that not yet filled (marked by 1)
+  int n = __builtin_ffsll(free_bits) - 1;
   if (n < 0) return -1;
 
   // pointer to the data block
-  char *p = ptr<1>(mem, n, bs);
-  if (p + bs > end) return -2;
+  char *p = ptr<1>(mem, n, lim.bs);
+  if (lim.data_over(p)) return -2;
 
-  mask ^= 1ul << n;
+  // flip 1-bit to 0 marking block allocated
+  free_bits ^= 1ul << n;
+
   return n;
 }
 
 template<int N>
-int store(void *mem, void*& last, void *end, const ErlNifBinary& bin, size_t bs) {
-  int n = alloc<N>(mem, last, end, bs);
+int store(void *mem, const ErlNifBinary& bin, limits& lim) {
+  int n = alloc<N>(mem, lim);
   if (n < 0) return n;
-  memcpy(pointer<N>(mem, n, bs), bin.data, bin.size);
+  memcpy(pointer<N>(mem, n, lim.bs), bin.data, bin.size);
   return n;
 }
 
@@ -164,23 +247,24 @@ struct bs_head {
   }
 
   int store(void *mem, void *end, const ErlNifBinary& bin) {
-    void *last = (char *)mem + limo;
-    int ret = ::store<BS_LEVELS>(mem, last, end, bin, block_size);
-    limo = (char *)last - (char *)mem;
+    limits lim(block_size, end, (char *)mem + limo);
+    int ret = ::store<BS_LEVELS>(mem, bin, lim);
+    limo = (char *)lim.last - (char *)mem;
     return ret;
   }
 
   template<typename T>
   bool read(void *mem, void *end, int addr, T consume) {
-    void *last = (char *)mem + limo;
-    void *ptr = ::real_pointer<BS_LEVELS>(mem, addr, block_size, end, last);
+    limits lim(block_size, end, (char *)mem + limo);
+    void *ptr = ::real_pointer<BS_LEVELS>(mem, addr, lim);
     if (ptr) consume(ptr, block_size);
     return ptr;
   }
 
   template<typename T>
   bool free(void *mem, void *end, int addr) {
-    void *last = (char *)mem + limo;
-    return ::free_block<BS_LEVELS>(mem, addr, block_size, end, last);
+    limits lim(block_size, end, (char *)mem + limo);
+    if (lim.mask_undef<BS_LEVELS>(mem)) return false;
+    return ::free_block<BS_LEVELS>(mem, addr, lim);
   }
 };

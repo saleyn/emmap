@@ -502,8 +502,8 @@ write_n_blocks(N, MFile, Size) ->
     Bytes1 = rand:bytes(Size),
 
     Addr = emmap:store_block(MFile, Bytes1),
-    ?assert(is_integer(Addr) andalso Addr >= 0),
     % io:format(user, "addr: ~p~n", [Addr]),
+    ?assert(is_integer(Addr) andalso Addr >= 0),
 
     Bytes2 = emmap:read_block(MFile, Addr),
     ?assertMatch(Bytes1, Bytes2),
