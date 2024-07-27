@@ -235,6 +235,36 @@ int store(void *mem, const ErlNifBinary& bin, limits& lim) {
   return n;
 }
 
+// fold through stored blocks
+
+template<int N, typename F> struct proc {
+static void fold(void *mem, const limits& lim, F fun) {
+  if (lim.mask_undef<N>(mem))
+    return;
+  uint64_t bit = 1;
+  for (int n = 0; n < 64; ++n, bit <<= 1) {
+    if ((used_mask(mem) & bit) != bit)
+      continue;
+    void *p = ptr<N>(mem, n, lim.bs);
+    proc<N-1, F>::fold(p, n, lim);
+  }
+} };
+
+template<typename F> struct proc<1, F> {
+static void fold(void *mem, const limits& lim, F fun) {
+  if (lim.mask_undef<1>(mem))
+    return;
+  uint64_t bit = 1;
+  for (int n = 0; n < 64; ++n, bit <<= 1) {
+    if ((free_mask(mem) & bit) == bit)
+      continue;
+    void *p = ptr<1>(mem, n, lim.bs);
+    if (lim.data_over(p))
+      break;
+    fun(p);
+  }
+} };
+
 }
 
 struct bs_head {
@@ -261,10 +291,15 @@ struct bs_head {
     return ptr;
   }
 
-  template<typename T>
   bool free(void *mem, void *end, int addr) {
     limits lim(block_size, end, (char *)mem + limo);
     if (lim.mask_undef<BS_LEVELS>(mem)) return false;
     return ::free_block<BS_LEVELS>(mem, addr, lim);
+  }
+
+  template<typename F>
+  void fold(void *mem, void *end, F fun) {
+    limits lim(block_size, end, (char *)mem + limo);
+    proc<BS_LEVELS, F>::fold(mem, lim, fun);
   }
 };
