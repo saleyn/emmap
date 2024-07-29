@@ -13,7 +13,7 @@
 -export([set_counter/3, read_counter/2]).
 
 -export([
-    init_block_storage/2, store_block/2, read_block/2
+    init_block_storage/2, store_block/2, read_block/2, read_blocks/1, free_block/2
 ]).
 
 -export_type([resource/0, mmap_file/0, open_option/0, open_extra_info/0]).
@@ -488,12 +488,35 @@ read_block(#file_descriptor{module=?MODULE, data=Mem}, Addr) when is_integer(Add
 read_blk_nif(_,_) ->
     erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
+%% @doc Read data blocks
+-spec read_blocks(File::mmap_file()) -> [Data::binary()] | eof | {error, atom()|string()}.
+read_blocks(#file_descriptor{module=?MODULE, data=Mem}) ->
+    read_blocks_nif(Mem).
+
+read_blocks_nif(_) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+
+%% @doc Free data block
+-spec free_block(File::mmap_file(), Addr::non_neg_integer()) -> Data::binary() | eof | {error, atom()|string()}.
+free_block(#file_descriptor{module=?MODULE, data=Mem}, Addr) when is_integer(Addr), Addr >= 0 ->
+    free_blk_nif(Mem, Addr).
+
+free_blk_nif(_,_) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+
 -ifdef(EUNIT).
 
 block_storage_test() ->
     {ok, MFile, #{size := 8}} = emmap:open("storage.bin", 0, 8, [create, write, shared]),
     ok = emmap:init_block_storage(MFile, 8),
     write_n_blocks(4096, MFile, 8),
+    T0 = erlang:monotonic_time(),
+    L = read_blocks(MFile),
+    T1 = erlang:monotonic_time(),
+    Diff = erlang:convert_time_unit(T1 - T0, native, microsecond),
+    ?debugFmt("elapsed ~p us~n", [Diff]),
+    ?assert(is_list(L)),
+    ?assertMatch(4096, length(L)),
     ok = emmap:flush(MFile),
     ok.
 

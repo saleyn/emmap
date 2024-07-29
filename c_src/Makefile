@@ -10,7 +10,7 @@ ERL_INTERFACE_LIB_DIR ?= $(shell erl -noshell -eval "io:format(\"~ts\", [code:li
 SOURCES := $(wildcard *.cpp)
 OBJECTS := $(addsuffix .o,  $(basename $(SOURCES)))
 TARGETS := $(addprefix $(BASEDIR)/priv/, $(addsuffix .so, $(basename $(SOURCES))))
-HEADERS := $(wildcard *.h)
+HEADERS := $(wildcard *.h*)
 
 ifneq ($(OUTDIR),$(BASEDIR))
 ifneq ($(OUTDIR),)

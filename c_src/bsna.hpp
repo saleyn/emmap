@@ -239,21 +239,19 @@ int store(void *mem, const ErlNifBinary& bin, limits& lim) {
 
 template<int N, typename F> struct proc {
 static void fold(void *mem, const limits& lim, F fun) {
-  if (lim.mask_undef<N>(mem))
-    return;
   uint64_t bit = 1;
   for (int n = 0; n < 64; ++n, bit <<= 1) {
     if ((used_mask(mem) & bit) != bit)
       continue;
     void *p = ptr<N>(mem, n, lim.bs);
-    proc<N-1, F>::fold(p, n, lim);
+    if (lim.mask_undef<N-1>(p))
+      break;
+    proc<N-1, F>::fold(p, lim, fun);
   }
 } };
 
 template<typename F> struct proc<1, F> {
 static void fold(void *mem, const limits& lim, F fun) {
-  if (lim.mask_undef<1>(mem))
-    return;
   uint64_t bit = 1;
   for (int n = 0; n < 64; ++n, bit <<= 1) {
     if ((free_mask(mem) & bit) == bit)
@@ -261,7 +259,7 @@ static void fold(void *mem, const limits& lim, F fun) {
     void *p = ptr<1>(mem, n, lim.bs);
     if (lim.data_over(p))
       break;
-    fun(p);
+    fun(p, lim.bs);
   }
 } };
 
@@ -300,6 +298,7 @@ struct bs_head {
   template<typename F>
   void fold(void *mem, void *end, F fun) {
     limits lim(block_size, end, (char *)mem + limo);
+    if (lim.mask_undef<BS_LEVELS>(mem)) return;
     proc<BS_LEVELS, F>::fold(mem, lim, fun);
   }
 };

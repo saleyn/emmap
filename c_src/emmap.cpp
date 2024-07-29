@@ -230,9 +230,9 @@ static ERL_NIF_TERM emmap_patomic_write_int(ErlNifEnv*, int argc, const ERL_NIF_
 // fixed-size blocks storage operations
 static ERL_NIF_TERM emmap_init_bs(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM emmap_read_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-// static ERL_NIF_TERM emmap_take_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM emmap_store_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
-// static ERL_NIF_TERM emmap_free_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_free_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_read_blocks(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 
 extern "C" {
 
@@ -258,9 +258,9 @@ extern "C" {
     {"read_line_nif",         1, emmap_read_line},
     {"init_bs_nif",           2, emmap_init_bs},
     {"read_blk_nif",          2, emmap_read_blk},
-    // {"take_blk_nif",          1, emmap_take_blk},
     {"store_blk_nif",         2, emmap_store_blk},
-    // {"free_blk_nif",          1, emmap_free_blk},
+    {"free_blk_nif",          2, emmap_free_blk},
+    {"read_blocks_nif",       1, emmap_read_blocks},
   };
 
 };
@@ -1237,6 +1237,7 @@ static ERL_NIF_TERM emmap_read_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
   if (argc!=2
       || !enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
       || !enif_get_ulong(env, argv[1], &addr)
+      || sizeof(bs_head) > handle->len
      )
     return enif_make_badarg(env);
 
@@ -1268,11 +1269,6 @@ static ERL_NIF_TERM emmap_read_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
 
   return res;
 }
-
-/* static ERL_NIF_TERM emmap_take_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
-{
-  return ATOM_ERROR;
-} */
 
 static inline int store_block(mhandle *handle, ErlNifBinary& bin) {
   bs_head& hdr = *(bs_head*)handle->mem;
@@ -1312,7 +1308,71 @@ static ERL_NIF_TERM emmap_store_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM
   return enif_make_ulong(env, addr);
 }
 
-/* static ERL_NIF_TERM emmap_free_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+static ERL_NIF_TERM emmap_free_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
-  return ATOM_ERROR;
-} */
+  unsigned long addr;
+  mhandle* handle;
+  if (argc!=2
+      || !enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
+      || !enif_get_ulong(env, argv[1], &addr)
+      || sizeof(bs_head) > handle->len
+     )
+    return enif_make_badarg(env);
+
+  if ((handle->prot & PROT_READ) == 0)
+    return make_error(env, ATOM_EACCES);
+
+  r_lock lock(handle);
+
+  if (handle->closed())
+    return make_error(env, ATOM_CLOSED);
+
+  bs_head& hdr = *(bs_head*)handle->mem;
+  char *mem = (char *)handle->mem;
+  void *start = mem + sizeof(bs_head);
+  void *stop = mem + handle->len;
+  return hdr.free(start, stop, addr);
+}
+
+static ERL_NIF_TERM emmap_read_blocks(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  mhandle* handle;
+  if (argc!=1
+      || !enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
+      || sizeof(bs_head) > handle->len
+     )
+    return enif_make_badarg(env);
+
+  if ((handle->prot & PROT_READ) == 0)
+    return make_error(env, ATOM_EACCES);
+
+  r_lock lock(handle);
+
+  if (handle->closed())
+    return make_error(env, ATOM_CLOSED);
+
+  bs_head& hdr = *(bs_head*)handle->mem;
+  char *mem = (char *)handle->mem;
+  void *start = mem + sizeof(bs_head);
+  void *stop = mem + handle->len;
+
+  ERL_NIF_TERM res = enif_make_list(env, 0);
+
+  // if this mmap is direct, use a resource binary
+  if (handle->direct)
+    hdr.fold(start, stop, [env, handle, &res] (void *ptr, size_t len) {
+      res = enif_make_list_cell(env, enif_make_resource_binary(env, handle, ptr, len), res);
+    });
+  else
+    // When it is non-direct, we have to allocate the binary
+    hdr.fold(start, stop, [env, handle, &res] (void *ptr, size_t len) {
+      ErlNifBinary bin;
+      if (enif_alloc_binary(len, &bin)) {
+        memcpy(bin.data, ptr, len);
+        res = enif_make_list_cell(env, enif_make_binary(env, &bin), res);
+      } else
+        res = make_error(env, ATOM_ENOMEM);
+    });
+
+  return res;
+}
