@@ -237,7 +237,10 @@ int store(void *mem, const ErlNifBinary& bin, limits& lim) {
 
 // fold through stored blocks
 
+template<int N> static inline const int c_flag() { return 1 << N * 6; }
+
 template<int N, typename F> struct proc {
+
 static void fold(void *mem, const limits& lim, F fun) {
   uint64_t bit = 1;
   for (int n = 0; n < 64; ++n, bit <<= 1) {
@@ -248,9 +251,37 @@ static void fold(void *mem, const limits& lim, F fun) {
       break;
     proc<N-1, F>::fold(p, lim, fun);
   }
-} };
+}
+
+static int fold(void *mem, const limits& lim, int addr, F fun) {
+  int start = addr % 64;
+  uint64_t bit = 1ul << start;
+  for (int n = start; n < 64; ++n, bit <<= 1) {
+    if ((used_mask(mem) & bit) != bit)
+      continue;
+    void *p = ptr<N>(mem, n, lim.bs);
+    if (lim.mask_undef<N-1>(p))
+      break;
+    int next = n == start ? addr / 64 : 0;
+    int ret = proc<N-1, F>::fold(p, lim, next, fun);
+    if (ret < 0)
+      return ret;
+    if (ret == 0)
+      continue;
+    // hit the limit
+    int cflag = c_flag<N-1>();
+    if ((cflag & ret) == cflag)
+      return ((ret ^ cflag) * 64 + n) | c_flag<N>();
+    else
+      return ret * 64 + n;
+  }
+  return 0;
+}
+
+};
 
 template<typename F> struct proc<1, F> {
+
 static void fold(void *mem, const limits& lim, F fun) {
   uint64_t bit = 1;
   for (int n = 0; n < 64; ++n, bit <<= 1) {
@@ -261,7 +292,29 @@ static void fold(void *mem, const limits& lim, F fun) {
       break;
     fun(p, lim.bs);
   }
-} };
+}
+
+static int fold(void *mem, const limits& lim, int addr, F fun) {
+  int start = addr % 64;
+  uint64_t bit = 1ul << start;
+  for (int n = start; n < 64; ++n, bit <<= 1) {
+    if ((free_mask(mem) & bit) == bit)
+      continue;
+    void *p = ptr<1>(mem, n, lim.bs);
+    if (lim.data_over(p))
+      return -1;
+    if (!fun(p, lim.bs)) {
+      // hit the limit
+      if (n == 63)
+        return c_flag<1>();
+      else
+        return n + 1;
+    }
+  }
+  return 0;
+}
+
+};
 
 }
 
@@ -300,5 +353,12 @@ struct bs_head {
     limits lim(block_size, end, (char *)mem + limo);
     if (lim.mask_undef<BS_LEVELS>(mem)) return;
     proc<BS_LEVELS, F>::fold(mem, lim, fun);
+  }
+
+  template<typename F>
+  int fold(void *mem, void *end, int start, F fun) {
+    limits lim(block_size, end, (char *)mem + limo);
+    if (lim.mask_undef<BS_LEVELS>(mem)) return -1;
+    return proc<BS_LEVELS, F>::fold(mem, lim, start, fun);
   }
 };

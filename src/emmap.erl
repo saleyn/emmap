@@ -13,7 +13,9 @@
 -export([set_counter/3, read_counter/2]).
 
 -export([
-    init_block_storage/2, store_block/2, read_block/2, read_blocks/1, free_block/2
+    init_block_storage/2, store_block/2,
+    read_block/2, read_blocks/1, read_blocks/3,
+    free_block/2
 ]).
 
 -export_type([resource/0, mmap_file/0, open_option/0, open_extra_info/0]).
@@ -496,6 +498,15 @@ read_blocks(#file_descriptor{module=?MODULE, data=Mem}) ->
 read_blocks_nif(_) ->
     erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
+%% @doc Read data blocks
+-spec read_blocks(File::mmap_file(), Start::non_neg_integer(), Count::pos_integer()) ->
+    [Data::binary()] | eof | {error, atom()|string()}.
+read_blocks(#file_descriptor{module=?MODULE, data=Mem}, Start, Count) ->
+    read_blocks_nif(Mem, Start, Count).
+
+read_blocks_nif(_, _, _) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+
 %% @doc Free data block
 -spec free_block(File::mmap_file(), Addr::non_neg_integer()) -> Data::binary() | eof | {error, atom()|string()}.
 free_block(#file_descriptor{module=?MODULE, data=Mem}, Addr) when is_integer(Addr), Addr >= 0 ->
@@ -506,17 +517,65 @@ free_blk_nif(_,_) ->
 
 -ifdef(EUNIT).
 
+bs_1_test() ->
+    {ok, MFile, #{size := 1}} = emmap:open("simple.bin", 0, 1, [create, write, shared]),
+    ok = emmap:init_block_storage(MFile, 1),
+
+    lists:foreach(fun (N) ->
+        Data = integer_to_binary(N),
+        Addr = emmap:store_block(MFile, Data),
+        Bytes = emmap:read_block(MFile, Addr),
+        ?assertEqual(Data, Bytes)
+    end, lists:seq(0, 9)),
+
+    L1 = read_blocks(MFile),
+    ?assert(is_list(L1)),
+
+    {L2, eof} = read_blocks(MFile, 0, 100),
+    ?assert(is_list(L2)),
+    ?assertEqual(L1, L2),
+
+    L3 = read_chunks(MFile, 3),
+    ?assertEqual(L1, L3),
+
+    ok.
+
+read_chunks(MFile, N) ->
+    read_chunks(MFile, 0, N, []).
+
+read_chunks(_MFile, eof, _, Acc) ->
+    lists:concat(Acc);
+read_chunks(MFile, Start, N, Acc) ->
+    {L, Cont} = read_blocks(MFile, Start, N),
+    ?assert(is_list(L)),
+    read_chunks(MFile, Cont, N, [L | Acc]).
+
 block_storage_test() ->
+    % file:write_file("/tmp/testpipe", [os:getpid(), "\n"]),
+    % timer:sleep(100),
+
     {ok, MFile, #{size := 8}} = emmap:open("storage.bin", 0, 8, [create, write, shared]),
     ok = emmap:init_block_storage(MFile, 8),
     write_n_blocks(4096, MFile, 8),
-    T0 = erlang:monotonic_time(),
-    L = read_blocks(MFile),
-    T1 = erlang:monotonic_time(),
-    Diff = erlang:convert_time_unit(T1 - T0, native, microsecond),
-    ?debugFmt("elapsed ~p us~n", [Diff]),
-    ?assert(is_list(L)),
-    ?assertMatch(4096, length(L)),
+
+    {T1, L1} = timer:tc(fun () -> read_blocks(MFile) end),
+    ?debugFmt("elapsed ~p us~n", [T1]),
+    ?assert(is_list(L1)),
+    ?assertMatch(4096, length(L1)),
+    % ?debugFmt("result: ~p~n", [L1]),
+
+    {T2, {L2, Cont}} = timer:tc(fun () -> read_blocks(MFile, 0, 5) end),
+    ?debugFmt("elapsed ~p us~n", [T2]),
+    ?assert(is_list(L2)),
+    ?assert(is_integer(Cont)),
+    ?assertMatch(5, length(L2)),
+    % ?debugFmt("result: ~p~n", [L2]),
+
+    {T3, L3} = timer:tc(fun () -> read_chunks(MFile, 100) end),
+    ?debugFmt("elapsed ~p us~n", [T3]),
+    ?assert(is_list(L3)),
+    ?assertMatch(4096, length(L3)),
+
     ok = emmap:flush(MFile),
     ok.
 
