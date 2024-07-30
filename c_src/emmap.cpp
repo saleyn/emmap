@@ -1332,7 +1332,7 @@ static ERL_NIF_TERM emmap_free_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
   char *mem = (char *)handle->mem;
   void *start = mem + sizeof(bs_head);
   void *stop = mem + handle->len;
-  return hdr.free(start, stop, addr);
+  return hdr.free(start, stop, addr) ? ATOM_TRUE : ATOM_FALSE;
 }
 
 static ERL_NIF_TERM emmap_read_blocks(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
