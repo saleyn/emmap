@@ -44,22 +44,50 @@ basic_test() ->
 
     ok.
 
+sustainability_test() ->
+    FName = "/tmp/garbage.bin",
+    lists:foreach(fun (Size) ->
+        ok = file:write_file(FName, rand:bytes(Size)),
+        {ok, MFile, #{size := Size}} = emmap:open(FName, []),
+        L = try
+            emmap:read_blocks(MFile)
+        catch error:badarg ->
+            []
+        end,
+        ?assert(is_list(L))
+    end, lists:seq(1, 1000)).
+
 big_random_test() ->
+    FileName = "/tmp/bigrandom.bin",
     BlockSize = 1531,
     Iterations = 100_000,
     MaxSize = 200,
 
-    {ok, MFile, #{size := 1}} = emmap:open("simple.bin", 0, 1, [create, write, shared]),
+    {ok, MFile, #{size := 1}} = emmap:open(FileName, 0, 1, [create, write, shared]),
     ok = emmap:init_block_storage(MFile, BlockSize),
 
-    loop(Iterations, MFile, #{}, fun
+    Acc = loop(Iterations, MFile, #{}, fun
         (data) ->
             rand:bytes(BlockSize);
         (Map) ->
             map_size(Map) < rand:uniform(MaxSize)
-    end).
+    end),
 
-loop(0, _, _, _) -> ok;
+    ?assertMatch(ok, emmap:close(MFile)),
+
+    {ok, MFile_, _} = emmap:open(FileName, [write, shared]),
+
+    loop(Iterations, MFile_, Acc, fun
+        (data) ->
+            rand:bytes(BlockSize);
+        (Map) ->
+            map_size(Map) < rand:uniform(MaxSize)
+    end),
+
+    ok.
+
+loop(0, _, Map, _) ->
+    Map;
 loop(N, MFile, Map, Fun) ->
     % ?debugFmt("~p items", [map_size(Map)]),
     case Fun(Map) of

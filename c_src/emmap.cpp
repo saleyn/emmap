@@ -1323,7 +1323,7 @@ static ERL_NIF_TERM emmap_free_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
      )
     return enif_make_badarg(env);
 
-  if ((handle->prot & PROT_READ) == 0)
+  if ((handle->prot & PROT_WRITE) == 0)
     return make_error(env, ATOM_EACCES);
 
   r_lock lock(handle);
