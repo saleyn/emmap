@@ -4,7 +4,7 @@
 
 basic_test() ->
     % open underlying memory-mapped file
-    {ok, MFile, #{size := 1}} = emmap:open("simple.bin", 0, 1, [create, write, shared]),
+    {ok, MFile, #{size := 1}} = emmap:open("/tmp/simple.bin", 0, 1, [create, write, shared]),
 
     % init block storage of the fixed block size
     ok = emmap:init_block_storage(MFile, 1),
@@ -115,7 +115,7 @@ read_chunks(MFile, Start, N, Acc) ->
     read_chunks(MFile, Cont, N, [L | Acc]).
 
 block_storage_test() ->
-    {ok, MFile, #{size := 8}} = emmap:open("storage.bin", 0, 8, [create, write, shared]),
+    {ok, MFile, #{size := 8}} = emmap:open("/tmp/storage.bin", 0, 8, [create, write, shared]),
     ok = emmap:init_block_storage(MFile, 8),
     write_n_blocks(4096, MFile, 8),
 
