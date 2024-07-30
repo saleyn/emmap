@@ -271,7 +271,10 @@ static int fold(void *mem, const limits& lim, int addr, F fun) {
     // hit the limit
     int cflag = c_flag<N-1>();
     if ((cflag & ret) == cflag)
-      return ((ret ^ cflag) * 64 + n) | c_flag<N>();
+      if (n == 63)
+        ret = c_flag<N>() | ((ret ^ cflag) * 64);
+      else
+        ret = (ret ^ cflag) * 64 + n + 1;
     else
       return ret * 64 + n;
   }
@@ -359,6 +362,8 @@ struct bs_head {
   int fold(void *mem, void *end, int start, F fun) {
     limits lim(block_size, end, (char *)mem + limo);
     if (lim.mask_undef<BS_LEVELS>(mem)) return -1;
-    return proc<BS_LEVELS, F>::fold(mem, lim, start, fun);
+    int ret = proc<BS_LEVELS, F>::fold(mem, lim, start, fun);
+    if (ret > 0 && (c_flag<BS_LEVELS>() & ret) > 0) ret = 0;
+    return ret;
   }
 };
