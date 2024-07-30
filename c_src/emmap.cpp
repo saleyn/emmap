@@ -1298,6 +1298,9 @@ static ERL_NIF_TERM emmap_store_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM
   if (handle->closed())
     return make_error(env, ATOM_CLOSED);
 
+  if (bin.size != ((bs_head*)handle->mem)->block_size)
+    return enif_make_badarg(env);
+
   int addr;
   while ((addr = store_block(handle, bin)) < 0) {
     if (addr < -1)

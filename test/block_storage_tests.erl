@@ -3,11 +3,14 @@
 -include_lib("eunit/include/eunit.hrl").
 
 basic_test() ->
-    file:write_file("/tmp/testpipe", [os:getpid(), "\n"]),
-    timer:sleep(100),
-
+    % open underlying memory-mapped file
     {ok, MFile, #{size := 1}} = emmap:open("simple.bin", 0, 1, [create, write, shared]),
+
+    % init block storage of the fixed block size
     ok = emmap:init_block_storage(MFile, 1),
+
+    % storing block of a wrong size is an error
+    ?assertError(badarg, emmap:store_block(MFile, <<1, 2, 3>>)),
 
     % write-read single blocks in a loop
     Addrs = lists:foldl(fun (N, Acc) ->
@@ -41,6 +44,38 @@ basic_test() ->
 
     ok.
 
+big_random_test() ->
+    BlockSize = 1531,
+    Iterations = 100_000,
+    MaxSize = 200,
+
+    {ok, MFile, #{size := 1}} = emmap:open("simple.bin", 0, 1, [create, write, shared]),
+    ok = emmap:init_block_storage(MFile, BlockSize),
+
+    loop(Iterations, MFile, #{}, fun
+        (data) ->
+            rand:bytes(BlockSize);
+        (Map) ->
+            map_size(Map) < rand:uniform(MaxSize)
+    end).
+
+loop(0, _, _, _) -> ok;
+loop(N, MFile, Map, Fun) ->
+    % ?debugFmt("~p items", [map_size(Map)]),
+    case Fun(Map) of
+        true ->
+            Data = Fun(data),
+            Addr = emmap:store_block(MFile, Data),
+            loop(N - 1, MFile, Map#{Addr => Data}, Fun);
+        false ->
+            Addr = lists:nth(rand:uniform(map_size(Map)), maps:keys(Map)),
+            {Data, Map_} = maps:take(Addr, Map),
+            Bytes = emmap:read_block(MFile, Addr),
+            ?assertMatch(Data, Bytes),
+            ?assertMatch(true, emmap:free_block(MFile, Addr)),
+            loop(N - 1, MFile, Map_, Fun)
+    end.
+
 read_chunks(MFile, N) ->
     read_chunks(MFile, 0, N, []).
 
@@ -61,13 +96,6 @@ block_storage_test() ->
     ?assert(is_list(L1)),
     ?assertMatch(4096, length(L1)),
     % ?debugFmt("result: ~p~n", [L1]),
-
-    {T2, {L2, Cont}} = timer:tc(fun () -> emmap:read_blocks(MFile, 0, 5) end),
-    ?debugFmt("elapsed ~p us~n", [T2]),
-    ?assert(is_list(L2)),
-    ?assert(is_integer(Cont)),
-    ?assertMatch(5, length(L2)),
-    % ?debugFmt("result: ~p~n", [L2]),
 
     {T3, L3} = timer:tc(fun () -> read_chunks(MFile, 100) end),
     ?debugFmt("elapsed ~p us~n", [T3]),
