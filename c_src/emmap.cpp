@@ -1259,7 +1259,7 @@ static ERL_NIF_TERM emmap_read_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
     });
   else
     // When it is non-direct, we have to allocate the binary
-    read_block(handle, addr, [env, handle, &res] (void *ptr, size_t len) {
+    read_block(handle, addr, [env, &res] (void *ptr, size_t len) {
       ErlNifBinary bin;
       if (enif_alloc_binary(len, &bin)) {
         memcpy(bin.data, ptr, len);
@@ -1381,7 +1381,7 @@ static ERL_NIF_TERM emmap_read_blocks(ErlNifEnv* env, int argc, const ERL_NIF_TE
       });
     else
       // When it is non-direct, we have to allocate the binary
-      ret = hdr.fold(start, stop, addr, [env, handle, &max, &res] (void *ptr, size_t len) -> bool {
+      ret = hdr.fold(start, stop, addr, [env, &max, &res] (void *ptr, size_t len) -> bool {
         ErlNifBinary bin;
         if (enif_alloc_binary(len, &bin)) {
           memcpy(bin.data, ptr, len);
@@ -1402,7 +1402,7 @@ static ERL_NIF_TERM emmap_read_blocks(ErlNifEnv* env, int argc, const ERL_NIF_TE
       });
     else
       // When it is non-direct, we have to allocate the binary
-      hdr.fold(start, stop, [env, handle, &res] (void *ptr, size_t len) {
+      hdr.fold(start, stop, [env, &res] (void *ptr, size_t len) {
         ErlNifBinary bin;
         if (enif_alloc_binary(len, &bin)) {
           memcpy(bin.data, ptr, len);
