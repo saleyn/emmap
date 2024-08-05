@@ -508,7 +508,7 @@ read_blocks_nif(_, _, _) ->
     erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Free data block
--spec free_block(File::mmap_file(), Addr::non_neg_integer()) -> Data::binary() | eof | {error, atom()|string()}.
+-spec free_block(File::mmap_file(), Addr::non_neg_integer()) -> Success :: boolean() | {error, atom()|string()}.
 free_block(#file_descriptor{module=?MODULE, data=Mem}, Addr) when is_integer(Addr), Addr >= 0 ->
     free_blk_nif(Mem, Addr).
 
