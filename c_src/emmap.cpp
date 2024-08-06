@@ -181,6 +181,7 @@ static ERL_NIF_TERM ATOM_FALSE;
 static ERL_NIF_TERM ATOM_FILE;
 static ERL_NIF_TERM ATOM_FIXED;
 static ERL_NIF_TERM ATOM_FIXED_SIZE;
+static ERL_NIF_TERM ATOM_FULL;
 static ERL_NIF_TERM ATOM_HUGETLB;
 static ERL_NIF_TERM ATOM_HUGE_2MB;
 static ERL_NIF_TERM ATOM_HUGE_1GB;
@@ -294,6 +295,7 @@ static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
   ATOM_FILE             = enif_make_atom(env, "file");
   ATOM_FIXED            = enif_make_atom(env, "fixed");
   ATOM_FIXED_SIZE       = enif_make_atom(env, "fixed_size");
+  ATOM_FULL             = enif_make_atom(env, "full");
   ATOM_HUGETLB          = enif_make_atom(env, "hugetlb");
   ATOM_HUGE_2MB         = enif_make_atom(env, "huge_2mb");
   ATOM_HUGE_1GB         = enif_make_atom(env, "huge_1gb");
@@ -1306,7 +1308,7 @@ static ERL_NIF_TERM emmap_store_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM
     if (addr < -1)
       RESIZE(env, handle);
     else
-      return make_error_tuple(env, "exhausted");
+      return make_error(env, ATOM_FULL);
   }
 
   return enif_make_ulong(env, addr);

@@ -27,6 +27,11 @@ else
 	V        := 0
 endif
 
+# If BS_LEVELS is defined, add a macro definition for it
+ifeq ($(origin BS_LEVELS), environment)
+  ADDFLAGS += -DBS_LEVELS=$(BS_LEVELS)
+endif
+
 UNAME_SYS  := $(shell uname -s)
 
 ifeq ($(UNAME_SYS),Darwin)
