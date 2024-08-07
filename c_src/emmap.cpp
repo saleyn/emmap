@@ -1377,17 +1377,19 @@ static ERL_NIF_TERM emmap_read_blocks(ErlNifEnv* env, int argc, const ERL_NIF_TE
   if (max > 0) {
     // if this mmap is direct, use a resource binary
     if (handle->direct)
-      ret = hdr.fold(start, stop, addr, [env, handle, &max, &res] (void *ptr, size_t len) -> bool {
-        res = enif_make_list_cell(env, enif_make_resource_binary(env, handle, ptr, len), res);
+      ret = hdr.fold(start, stop, addr, [env, handle, &max, &res] (int addr, void *ptr, size_t len) -> bool {
+        res = enif_make_list_cell(env,
+          enif_make_tuple2(env, enif_make_int(env, addr), enif_make_resource_binary(env, handle, ptr, len)), res);
         return --max > 0;
       });
     else
-      // When it is non-direct, we have to allocate the binary
-      ret = hdr.fold(start, stop, addr, [env, &max, &res] (void *ptr, size_t len) -> bool {
+      // when it is non-direct, we have to allocate the binary
+      ret = hdr.fold(start, stop, addr, [env, &max, &res] (int addr, void *ptr, size_t len) -> bool {
         ErlNifBinary bin;
         if (enif_alloc_binary(len, &bin)) {
           memcpy(bin.data, ptr, len);
-          res = enif_make_list_cell(env, enif_make_binary(env, &bin), res);
+          res = enif_make_list_cell(env,
+            enif_make_tuple2(env, enif_make_int(env, addr), enif_make_binary(env, &bin)), res);
         } else
           res = make_error(env, ATOM_ENOMEM);
         return --max > 0;
@@ -1399,16 +1401,18 @@ static ERL_NIF_TERM emmap_read_blocks(ErlNifEnv* env, int argc, const ERL_NIF_TE
   else {
     // if this mmap is direct, use a resource binary
     if (handle->direct)
-      hdr.fold(start, stop, [env, handle, &res] (void *ptr, size_t len) {
-        res = enif_make_list_cell(env, enif_make_resource_binary(env, handle, ptr, len), res);
+      hdr.fold(start, stop, [env, handle, &res] (int addr, void *ptr, size_t len) {
+        res = enif_make_list_cell(env,
+          enif_make_tuple2(env, enif_make_int(env, addr), enif_make_resource_binary(env, handle, ptr, len)), res);
       });
     else
-      // When it is non-direct, we have to allocate the binary
-      hdr.fold(start, stop, [env, &res] (void *ptr, size_t len) {
+      // when it is non-direct, we have to allocate the binary
+      hdr.fold(start, stop, [env, &res] (int addr, void *ptr, size_t len) {
         ErlNifBinary bin;
         if (enif_alloc_binary(len, &bin)) {
           memcpy(bin.data, ptr, len);
-          res = enif_make_list_cell(env, enif_make_binary(env, &bin), res);
+          res = enif_make_list_cell(env,
+            enif_make_tuple2(env, enif_make_int(env, addr), enif_make_binary(env, &bin)), res);
         } else
           res = make_error(env, ATOM_ENOMEM);
       });

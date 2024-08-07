@@ -34,6 +34,9 @@ basic_test() ->
     L3 = read_chunks(MFile, 3),
     ?assertMatch(L1, L3),
 
+    Addrs_ = [Addr || {Addr, _Data} <- L1],
+    ?assertMatch(Addrs_, Addrs),
+
     % remove all blocks
     lists:foreach(fun (Addr) ->
         ?assertMatch(true, emmap:free_block(MFile, Addr))
@@ -130,7 +133,13 @@ block_storage_test() ->
     ?assert(is_list(L3)),
     ?assertMatch(4096, length(L3)),
 
-    ok = emmap:flush(MFile),
+    ?assertMatch(L1, L3),
+    lists:foreach(fun ({Addr, _Data}) ->
+        ?assertMatch(true, emmap:free_block(MFile, Addr))
+    end, L1),
+
+    ?assertMatch([], emmap:read_blocks(MFile)),
+
     ok.
 
 write_n_blocks(0, _, _) -> ok;
