@@ -500,7 +500,7 @@ read_blocks_nif(_) ->
 
 %% @doc Read data blocks
 -spec read_blocks(File::mmap_file(), Start::non_neg_integer(), Count::pos_integer()) ->
-    [Data::binary()] | eof | {error, atom()|string()}.
+    {[Data::binary()], Continuation::integer() | eof} | {error, atom()|string()}.
 read_blocks(#file_descriptor{module=?MODULE, data=Mem}, Start, Count) ->
     read_blocks_nif(Mem, Start, Count).
 
