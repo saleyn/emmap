@@ -1,4 +1,4 @@
-// ex: ts=2 sw=2 ft=cpp et indentexpr=
+// ex: ts=2 sw=2 ft=cpp et
 /**
  * \file
  * \brief Fixed size blocks storage
@@ -28,7 +28,7 @@ template<>
 size_t block_size<0>(size_t bs, int) { return bs; }
 
 template<int N>
-int alloc(void *mem, size_t bs) {
+int alloc(void* mem, size_t bs) {
   auto mask_ptr = static_cast<std::atomic<uint64_t> *>(mem);
 
   while (true) {
@@ -61,7 +61,7 @@ int alloc(void *mem, size_t bs) {
 }
 
 template<>
-int alloc<0>(void *mem, size_t) {
+int alloc<0>(void* mem, size_t) {
   auto mask_ptr = static_cast<std::atomic<uint64_t> *>(mem);
   uint64_t mask = mask_ptr->load(std::memory_order_relaxed);
 
@@ -77,7 +77,7 @@ int alloc<0>(void *mem, size_t) {
   }
 }
 
-int alloc(void *mem, size_t bs) {
+int alloc(void* mem, size_t bs) {
   return alloc<2>(mem, bs);
 }
 
