@@ -1,4 +1,4 @@
-// ex: ts=2 sw=2 ft=cpp et indentexpr=
+// ex: ts=2 sw=2 ft=cpp et
 /**
  * \file
  * \brief Fixed size blocks storage - non-atomic version
@@ -24,13 +24,13 @@ namespace {
 const uint64_t filled = 0xffff'ffff'ffff'ffff;
 const uint64_t vacant = 0x0000'0000'0000'0000;
 
-static inline uint64_t& free_mask(void *mem) { return ((uint64_t*)mem)[0]; }
-static inline uint64_t& used_mask(void *mem) { return ((uint64_t*)mem)[1]; }
+static inline uint64_t& free_mask(void* mem) { return ((uint64_t*)mem)[0]; }
+static inline uint64_t& used_mask(void* mem) { return ((uint64_t*)mem)[1]; }
 
 template<int N>
-inline bool not_used(void *mem) { return used_mask(mem) == vacant; }
+inline bool not_used(void* mem) { return used_mask(mem) == vacant; }
 template<>
-inline bool not_used<1>(void *mem) { return free_mask(mem) == filled; }
+inline bool not_used<1>(void* mem) { return free_mask(mem) == filled; }
 
 static inline void maybe_init_mask(void* mem, void*& last) {
   // initialize ground level mask if not yet done
@@ -68,69 +68,69 @@ inline size_t block_size<1>(size_t bs, int n) {
 
 // translate address to pointer
 template<int N>
-inline char *ptr(void *mem, int n, size_t bs) {
+inline char *ptr(void* mem, int n, size_t bs) {
   return (char *)mem + block_size<N>(bs, n);
 }
 
 // translate address to a pointer
 template<int N>
-inline void *pointer(void *mem, int addr, size_t bs) {
+inline void* pointer(void* mem, int addr, size_t bs) {
   return pointer<N-1>(ptr<N>(mem, addr % 64, bs), addr / 64, bs);
 }
 
 template<>
-inline void *pointer<0>(void *mem, int, size_t) { return mem; }
+inline void* pointer<0>(void* mem, int, size_t) { return mem; }
 
 struct limits {
   size_t bs;
-  void *end;
-  void *last;
+  void* end;
+  void* last;
 
-  limits(size_t b, void *e, void *l) : bs(b), end(e), last(l) {}
+  limits(size_t b, void* e, void* l) : bs(b), end(e), last(l) {}
 
   template<int N>
-  bool mask_over(const void *ptr) const {
+  bool mask_over(const void* ptr) const {
     return (char *)ptr + mask_len<N>() > end;
   }
 
   template<int N>
-  bool mask_undef(const void *ptr) const {
+  bool mask_undef(const void* ptr) const {
     return ptr > last || (char *)ptr + mask_len<N>() > end;
   }
 
-  bool data_over(const void *ptr) const {
+  bool data_over(const void* ptr) const {
     return (char *)ptr + bs > end;
   }
 };
 
 // translate address to pointer to an existing block
 template<int N>
-inline void *real_pointer(void *mem, int addr, const limits& lim) {
+inline void* real_pointer(void* mem, int addr, const limits& lim) {
   if (lim.mask_undef<N>(mem)) return nullptr;
-  void *p = ptr<N>(mem, addr % 64, lim.bs);
+  void* p = ptr<N>(mem, addr % 64, lim.bs);
   return real_pointer<N-1>(p, addr / 64, lim);
 }
 
 template<>
-inline void *real_pointer<1>(void *mem, int addr, const limits& lim) {
+inline void* real_pointer<1>(void* mem, int addr, const limits& lim) {
   if (lim.mask_undef<1>(mem)) return nullptr;
   int n = addr % 64;
   // attempt to access unallocated block?
   if ((free_mask(mem) & (1ul << n)) != vacant) return nullptr;
-  void *p = ptr<1>(mem, n, lim.bs);
+  void* p = ptr<1>(mem, n, lim.bs);
   return lim.data_over(p) ? nullptr : p;
 }
 
 // free block
 template<int N>
-inline bool free_block(void *mem, int addr, const limits& lim) {
+inline bool free_block(void* mem, int addr, const limits& lim) {
   // bit
   int n = addr % 64;
   uint64_t bit = 1ul << n;
   bool ret;
 
   // next level pointer
-  void *p = ptr<N>(mem, n, lim.bs);
+  void* p = ptr<N>(mem, n, lim.bs);
   if (lim.mask_undef<N-1>(p)) {
     ret = false;
 
@@ -152,7 +152,7 @@ inline bool free_block(void *mem, int addr, const limits& lim) {
 
 // free block
 template<>
-inline bool free_block<1>(void *mem, int addr, const limits&) {
+inline bool free_block<1>(void* mem, int addr, const limits&) {
   // bit
   int n = addr % 64;
   uint64_t bit = 1ul << n;
@@ -167,7 +167,7 @@ inline bool free_block<1>(void *mem, int addr, const limits&) {
 }
 
 template<int N>
-int alloc(void *mem, limits& lim) {
+int alloc(void* mem, limits& lim) {
   if (lim.mask_over<N>(mem)) return -2;
   maybe_init_masks(mem, lim.last);
   uint64_t& free_bits = free_mask(mem);
@@ -208,7 +208,7 @@ int alloc(void *mem, limits& lim) {
 }
 
 template<>
-int alloc<1>(void *mem, limits& lim) {
+int alloc<1>(void* mem, limits& lim) {
   if (lim.mask_over<1>(mem)) return -2;
   maybe_init_mask(mem, lim.last);
   uint64_t& free_bits = free_mask(mem);
@@ -228,7 +228,7 @@ int alloc<1>(void *mem, limits& lim) {
 }
 
 template<int N>
-int store(void *mem, const ErlNifBinary& bin, limits& lim) {
+int store(void* mem, const ErlNifBinary& bin, limits& lim) {
   int n = alloc<N>(mem, lim);
   if (n < 0) return n;
   memcpy(pointer<N>(mem, n, lim.bs), bin.data, bin.size);
@@ -246,12 +246,12 @@ static inline int mkaddr(int n, int base) { return base + (n << (BS_LEVELS - N) 
 template<int N> struct proc {
 
 template<typename F>
-static void fold(int base, void *mem, const limits& lim, F fun) {
+static void fold(int base, void* mem, const limits& lim, F fun) {
   uint64_t bit = 1ul;
   for (int n = 0; n < 64; ++n, bit <<= 1) {
     if ((used_mask(mem) & bit) != bit)
       continue;
-    void *p = ptr<N>(mem, n, lim.bs);
+    void* p = ptr<N>(mem, n, lim.bs);
     if (lim.mask_undef<N-1>(p))
       break;
     proc<N-1>::fold(mkaddr<N>(n, base), p, lim, fun);
@@ -259,13 +259,13 @@ static void fold(int base, void *mem, const limits& lim, F fun) {
 }
 
 template<typename F>
-static int fold(int base, void *mem, const limits& lim, int addr, F fun) {
+static int fold(int base, void* mem, const limits& lim, int addr, F fun) {
   int start = addr % 64;
   uint64_t bit = 1ul << start;
   for (int n = start; n < 64; ++n, bit <<= 1) {
     if ((used_mask(mem) & bit) != bit)
       continue;
-    void *p = ptr<N>(mem, n, lim.bs);
+    void* p = ptr<N>(mem, n, lim.bs);
     if (lim.mask_undef<N-1>(p))
       break;
     int next = n == start ? addr / 64 : 0;
@@ -288,16 +288,16 @@ static int fold(int base, void *mem, const limits& lim, int addr, F fun) {
   return 0;
 }
 
-static std::tuple<bool, bool> repair(void *mem, const limits& lim) {
+static std::tuple<bool, bool> repair(void* mem, const limits& lim) {
   uint64_t bit = 1ul;
 
   for (int n = 0; n < 64; ++n, bit <<= 1) {
     bool l_used = used_mask(mem) & bit;
     bool l_free = free_mask(mem) & bit;
-    void *p = ptr<N>(mem, n, lim.bs);
+    void* p = ptr<N>(mem, n, lim.bs);
 
     if (lim.mask_undef<N-1>(p)) {
-      if (l_used) used_mask(mem) &= ~bit;
+      if (l_used)  used_mask(mem) &= ~bit;
       if (!l_free) free_mask(mem) |= bit;
       continue;
     }
@@ -307,29 +307,29 @@ static std::tuple<bool, bool> repair(void *mem, const limits& lim) {
       if (!l_used) used_mask(mem) |= bit;
     }
     else {
-      if (l_used) used_mask(mem) &= ~bit;
+      if (l_used)  used_mask(mem) &= ~bit;
     }
     if (r_free) {
       if (!l_free) free_mask(mem) |= bit;
     }
     else {
-      if (l_free) free_mask(mem) &= ~bit;
+      if (l_free)  free_mask(mem) &= ~bit;
     }
   }
 
   return std::tuple(used_mask(mem) != vacant, free_mask(mem) != vacant);
 }
 
-static std::tuple<int, bool, bool> repair(void *mem, const limits& lim, int addr, int& left) {
+static std::tuple<int, bool, bool> repair(void* mem, const limits& lim, int addr, int& left) {
   int start = addr % 64;
   uint64_t bit = 1ul << start;
   for (int n = start; n < 64; ++n, bit <<= 1) {
     bool l_used = used_mask(mem) & bit;
     bool l_free = free_mask(mem) & bit;
-    void *p = ptr<N>(mem, n, lim.bs);
+    void* p = ptr<N>(mem, n, lim.bs);
 
     if (lim.mask_undef<N-1>(p)) {
-      if (l_used) used_mask(mem) &= ~bit;
+      if (l_used)  used_mask(mem) &= ~bit;
       if (!l_free) free_mask(mem) |= bit;
       continue;
     }
@@ -342,7 +342,7 @@ static std::tuple<int, bool, bool> repair(void *mem, const limits& lim, int addr
       if (!l_used) used_mask(mem) |= bit;
     }
     else {
-      if (l_used) used_mask(mem) &= ~bit;
+      if (l_used)  used_mask(mem) &= ~bit;
     }
 
     // repair free mask
@@ -350,7 +350,7 @@ static std::tuple<int, bool, bool> repair(void *mem, const limits& lim, int addr
       if (!l_free) free_mask(mem) |= bit;
     }
     else {
-      if (l_free) free_mask(mem) &= ~bit;
+      if (l_free)  free_mask(mem) &= ~bit;
     }
 
     // hit the limit?
@@ -378,12 +378,12 @@ static std::tuple<int, bool, bool> repair(void *mem, const limits& lim, int addr
 template<> struct proc<1> {
 
 template<typename F>
-static void fold(int base, void *mem, const limits& lim, F fun) {
+static void fold(int base, void* mem, const limits& lim, F fun) {
   uint64_t bit = 1ul;
   for (int n = 0; n < 64; ++n, bit <<= 1) {
     if ((free_mask(mem) & bit) == bit)
       continue;
-    void *p = ptr<1>(mem, n, lim.bs);
+    void* p = ptr<1>(mem, n, lim.bs);
     if (lim.data_over(p))
       break;
     fun(mkaddr<1>(n, base), p, lim.bs);
@@ -391,13 +391,13 @@ static void fold(int base, void *mem, const limits& lim, F fun) {
 }
 
 template<typename F>
-static int fold(int base, void *mem, const limits& lim, int addr, F fun) {
+static int fold(int base, void* mem, const limits& lim, int addr, F fun) {
   int start = addr % 64;
   uint64_t bit = 1ul << start;
   for (int n = start; n < 64; ++n, bit <<= 1) {
     if ((free_mask(mem) & bit) == bit)
       continue;
-    void *p = ptr<1>(mem, n, lim.bs);
+    void* p = ptr<1>(mem, n, lim.bs);
     if (lim.data_over(p))
       return -1;
     if (!fun(mkaddr<1>(n, base), p, lim.bs)) {
@@ -411,11 +411,11 @@ static int fold(int base, void *mem, const limits& lim, int addr, F fun) {
   return 0;
 }
 
-static std::tuple<bool, bool> repair(void *mem, const limits& lim) {
+static std::tuple<bool, bool> repair(void* mem, const limits& lim) {
   uint64_t bit = 1ul;
   for (int n = 0; n < 64; ++n, bit <<= 1) {
     bool l_free = free_mask(mem) & bit;
-    void *p = ptr<1>(mem, n, lim.bs);
+    void* p = ptr<1>(mem, n, lim.bs);
     if (lim.data_over(p)) {
       if (!l_free) free_mask(mem) |= bit;
     }
@@ -423,13 +423,13 @@ static std::tuple<bool, bool> repair(void *mem, const limits& lim) {
   return std::tuple(free_mask(mem) != filled, free_mask(mem) != vacant);
 }
 
-static std::tuple<int, bool, bool> repair(void *mem, const limits& lim, int addr, int& left) {
+static std::tuple<int, bool, bool> repair(void* mem, const limits& lim, int addr, int& left) {
   int start = addr % 64;
   uint64_t bit = 1ul << start;
 
   for (int n = start; n < 64; ++n, bit <<= 1) {
     bool l_free = free_mask(mem) & bit;
-    void *p = ptr<1>(mem, n, lim.bs);
+    void* p = ptr<1>(mem, n, lim.bs);
 
     if (lim.data_over(p)) {
       if (!l_free) free_mask(mem) |= bit;
@@ -460,7 +460,7 @@ struct bs_head {
     limo = -1;
   }
 
-  int store(void *mem, void *end, const ErlNifBinary& bin) {
+  int store(void* mem, void* end, const ErlNifBinary& bin) {
     limits lim(block_size, end, (char *)mem + limo);
     int ret = ::store<BS_LEVELS>(mem, bin, lim);
     limo = (char *)lim.last - (char *)mem;
@@ -468,28 +468,28 @@ struct bs_head {
   }
 
   template<typename T>
-  bool read(void *mem, void *end, int addr, T consume) {
+  bool read(void* mem, void* end, int addr, T consume) {
     limits lim(block_size, end, (char *)mem + limo);
-    void *ptr = ::real_pointer<BS_LEVELS>(mem, addr, lim);
+    void* ptr = ::real_pointer<BS_LEVELS>(mem, addr, lim);
     if (ptr) consume(ptr, block_size);
     return ptr;
   }
 
-  bool free(void *mem, void *end, int addr) {
+  bool free(void* mem, void* end, int addr) {
     limits lim(block_size, end, (char *)mem + limo);
     if (lim.mask_undef<BS_LEVELS>(mem)) return false;
     return ::free_block<BS_LEVELS>(mem, addr, lim);
   }
 
   template<typename F>
-  void fold(void *mem, void *end, F fun) {
+  void fold(void* mem, void* end, F fun) {
     limits lim(block_size, end, (char *)mem + limo);
     if (lim.mask_undef<BS_LEVELS>(mem)) return;
     proc<BS_LEVELS>::fold(0, mem, lim, fun);
   }
 
   template<typename F>
-  int fold(void *mem, void *end, int start, F fun) {
+  int fold(void* mem, void* end, int start, F fun) {
     limits lim(block_size, end, (char *)mem + limo);
     if (lim.mask_undef<BS_LEVELS>(mem)) return -1;
     int ret = proc<BS_LEVELS>::fold(0, mem, lim, start, fun);
@@ -497,13 +497,13 @@ struct bs_head {
     return ret;
   }
 
-  void repair(void *mem, void *end) {
+  void repair(void* mem, void* end) {
     limits lim(block_size, end, (char *)mem + limo);
     if (lim.mask_undef<BS_LEVELS>(mem)) return;
     proc<BS_LEVELS>::repair(mem, lim);
   }
 
-  int repair(void *mem, void *end, int start, int max) {
+  int repair(void* mem, void* end, int start, int max) {
     limits lim(block_size, end, (char *)mem + limo);
     if (lim.mask_undef<BS_LEVELS>(mem)) return 0;
     return std::get<0>(proc<BS_LEVELS>::repair(mem, lim, start, max));
