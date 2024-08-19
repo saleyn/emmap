@@ -238,7 +238,7 @@ int store(void *mem, const ErlNifBinary& bin, limits& lim) {
 // fold through stored blocks
 
 template<int N>
-static inline const int c_flag() { return 1 << N * 6; }
+static inline constexpr const int c_flag() { return 1 << N * 6; }
 
 template<int N>
 static inline int mkaddr(int n, int base) { return base + (n << (BS_LEVELS - N) * 6); }
