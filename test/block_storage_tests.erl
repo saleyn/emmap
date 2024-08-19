@@ -57,7 +57,7 @@ sustainability_test() ->
         ok = file:write_file(FName, Data),
         {ok, MFile, #{size := Size}} = emmap:open(FName, [write]),
         try
-            % read a whole storage
+            % read the whole storage
             L1 = emmap:read_blocks(MFile),
             ?assert(is_list(L1)),
 
