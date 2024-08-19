@@ -1,22 +1,22 @@
 -module(emmap).
 
 -export([
-    init/0,
-    open/2, open/4, close/1, resize/1, resize/2, flush/1,
-    pread/3, pwrite/3, read/2, read_line/1, position/2,
-    patomic_add/3,  patomic_sub/3, patomic_and/3, patomic_or/3, patomic_xor/3,
-    patomic_xchg/3, patomic_cas/4,
-    patomic_read_integer/2, patomic_write_integer/3
+  init/0,
+  open/2, open/4, close/1, resize/1, resize/2, flush/1,
+  pread/3, pwrite/3, read/2, read_line/1, position/2,
+  patomic_add/3,  patomic_sub/3, patomic_and/3, patomic_or/3, patomic_xor/3,
+  patomic_xchg/3, patomic_cas/4,
+  patomic_read_integer/2, patomic_write_integer/3
 ]).
 -export([open_counters/1, open_counters/2, close_counters/1]).
 -export([inc_counter/2, inc_counter/3, dec_counter/2, dec_counter/3]).
 -export([set_counter/3, read_counter/2]).
 
 -export([
-    init_block_storage/2,
-    repair_block_storage/1, repair_block_storage/3,
-    store_block/2, read_block/2, free_block/2,
-    read_blocks/1, read_blocks/3
+  init_block_storage/2,
+  repair_block_storage/1, repair_block_storage/3,
+  store_block/2, read_block/2, free_block/2,
+  read_blocks/1, read_blocks/3
 ]).
 
 -export_type([resource/0, mmap_file/0, open_option/0, open_extra_info/0]).
@@ -162,20 +162,20 @@
 %% represents the size of the memory map that was open.
 
 init() ->
-    SoName =
-        case code:priv_dir(emmap) of
-            {error, bad_name} ->
-                case code:which(?MODULE) of
-                    Filename when is_list(Filename) ->
-                        Dir = filename:dirname(filename:dirname(Filename)),
-                        filename:join([Dir, "priv", "emmap"]);
-                    _ ->
-                        filename:join("../priv", "emmap")
-                end;
-            Dir ->
-                filename:join(Dir, "emmap")
-        end,
-    erlang:load_nif(SoName, 0).
+  SoName =
+    case code:priv_dir(emmap) of
+      {error, bad_name} ->
+        case code:which(?MODULE) of
+          Filename when is_list(Filename) ->
+            Dir = filename:dirname(filename:dirname(Filename)),
+            filename:join([Dir, "priv", "emmap"]);
+          _ ->
+            filename:join("../priv", "emmap")
+        end;
+      Dir ->
+        filename:join(Dir, "emmap")
+    end,
+  erlang:load_nif(SoName, 0).
 
 %% @doc Open/create a memory-mapped file.
 %% If creating a new file, `[create, read, write, {size, N}]' options are required.
@@ -183,14 +183,14 @@ init() ->
 -spec open(string()|binary(), [open_option()]) ->
         {ok, mmap_file(), open_extra_info()} | {error, term()}.
 open(FileName, Options) when is_binary(FileName) ->
-    open(binary_to_list(FileName), Options);
+  open(binary_to_list(FileName), Options);
 open(FileName, Options) when is_list(FileName) ->
-    case file:read_file_info(FileName) of
-        {ok, FileInfo} ->
-            open(FileName, 0, nvl(FileInfo#file_info.size, 0), Options);
-        _Error ->
-            open(FileName, 0, 0, Options)
-    end.
+  case file:read_file_info(FileName) of
+    {ok, FileInfo} ->
+      open(FileName, 0, nvl(FileInfo#file_info.size, 0), Options);
+    _Error ->
+      open(FileName, 0, 0, Options)
+  end.
 
 %% @doc Open/create a memory-mapped file.
 %% If creating a new file, `[create, read, write]' options and the `Len' parameter
@@ -203,22 +203,22 @@ open(FileName, Options) when is_list(FileName) ->
           Options::[ open_option() ]) ->
                  {ok, mmap_file(), open_extra_info()} | {error, term()}.
 open(FileName, Off, Len, Options) when is_binary(FileName) ->
-    open(binary_to_list(FileName), Off, Len, Options);
+  open(binary_to_list(FileName), Off, Len, Options);
 open(FileName, Off, Len, Options) when is_list(FileName), is_integer(Off), is_integer(Len) ->
-    case open_nif(FileName, Off, Len, Options) of
-        {ok, Mem, Info} ->
-            {ok, #file_descriptor{module=?MODULE, data=Mem}, Info};
-        {error, _} = Error ->
-            Error
-    end.
+  case open_nif(FileName, Off, Len, Options) of
+      {ok, Mem, Info} ->
+        {ok, #file_descriptor{module=?MODULE, data=Mem}, Info};
+      {error, _} = Error ->
+        Error
+  end.
 
 open_nif(_,_,_,_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 -spec close(File::mmap_file()) -> ok.
 close(#file_descriptor{module=?MODULE, data=Mem}) -> close_nif(Mem).
 close_nif(_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Resize shared memory.
 %% The new size will double the existing size up until the `max_inc_size' threshold (passed
@@ -233,7 +233,7 @@ resize(#file_descriptor{module=?MODULE, data=Mem}, NewSize) when is_integer(NewS
   resize_nif(Mem, NewSize).
 
 resize_nif(_, _) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Ask the OS to flush the modified memory to disk. The call is asyncronous and
 %% non-blocking.  This call is not required as the OS will asynchronously flush the
@@ -242,11 +242,11 @@ resize_nif(_, _) ->
 -spec flush(File::mmap_file()) -> ok.
 flush(#file_descriptor{module=?MODULE, data=Mem}) -> sync_nif(Mem).
 sync_nif(_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Read `Len' bytes from a memory-mapped file at a given offset `Off'.
 -spec pread(File::mmap_file(), Offset::non_neg_integer(), Length::non_neg_integer()) ->
-                   {ok, binary()} | {error, term()} | eof.
+        {ok, binary()} | {error, term()} | eof.
 
 pread(#file_descriptor{module=?MODULE, data=Mem}, Off, Len) ->
   pread_nif(Mem, Off, Len).
@@ -256,25 +256,25 @@ pread_nif(_,_,_) ->
 %% @doc Read next `Len' bytes from a memory-mapped file.
 %% Internally the new position within the file is incremented by `Len'.
 -spec read(File::mmap_file(), Length::non_neg_integer()) ->
-                   {ok, binary()} | {error, term()} | eof.
+        {ok, binary()} | {error, term()} | eof.
 
 read(#file_descriptor{module=?MODULE, data=Mem}, Len) -> read_nif(Mem, Len).
 read_nif(_,_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 
 -spec read_line(File::mmap_file()) -> {ok, binary()} | {error, term()} | eof.
 
 read_line(#file_descriptor{module=?MODULE, data=Mem}) -> read_line_nif(Mem).
 read_line_nif(_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Write `Data' bytes to a memory-mapped file at a given offset `Off'.
 -spec pwrite(File::mmap_file(), Position::non_neg_integer(), Data::binary()) ->
-                    ok | {error, term()}.
+        ok | {error, term()}.
 pwrite(#file_descriptor{module=?MODULE, data=Mem}, Off, Data) -> pwrite_nif(Mem, Off, Data).
 pwrite_nif(_,_,_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Write `Data' bytes to a memory-mapped file at a given offset `At'.
 -spec position(File::mmap_file(),
@@ -291,7 +291,7 @@ position(#file_descriptor{module=?MODULE, data=Mem}, {From, Off})
     position_nif(Mem, From, Off).
 
 position_nif(_,_From,_Off) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Perform an atomic ADD operation on a 64-bit integer value at given `Position'
 %% using specified argument `Value'.  The function returns an old value at that
@@ -304,7 +304,7 @@ patomic_add(#file_descriptor{module=?MODULE, data=Mem}, Off, Value)
     patomic_add_nif(Mem, Off, Value).
 
 patomic_add_nif(_,_,_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Perform an atomic SUBTRACT operation on a 64-bit integer value at given `Position'
 %% using specified argument `Value'.  The function returns an old value at that
@@ -317,7 +317,7 @@ patomic_sub(#file_descriptor{module=?MODULE, data=Mem}, Off, Value)
     patomic_sub_nif(Mem, Off, Value).
 
 patomic_sub_nif(_,_,_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Perform an atomic AND operation on a 64-bit integer value at given `Position'
 %% using specified argument `Value'.  The function returns an AND'd value at that
@@ -329,7 +329,7 @@ patomic_and(#file_descriptor{module=?MODULE, data=Mem}, Off, Value)
     patomic_and_nif(Mem, Off, Value).
 
 patomic_and_nif(_,_,_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Perform an atomic OR operation on a 64-bit integer value at given `Position'
 %% using specified argument `Value'.  The function returns an OR'd value at that
@@ -341,7 +341,7 @@ patomic_or(#file_descriptor{module=?MODULE, data=Mem}, Off, Value)
     patomic_or_nif(Mem, Off, Value).
 
 patomic_or_nif(_,_,_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Perform an atomic XOR operation on a 64-bit integer value at given `Position'
 %% using specified argument `Value'.  The function returns an XOR'd value at that
@@ -353,7 +353,7 @@ patomic_xor(#file_descriptor{module=?MODULE, data=Mem}, Off, Value)
     patomic_xor_nif(Mem, Off, Value).
 
 patomic_xor_nif(_,_,_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Perform an atomic EXCHANGE operation on a 64-bit integer value at given `Position'
 %% using specified argument `Value'.  The function returns an old value at that
@@ -365,7 +365,7 @@ patomic_xchg(#file_descriptor{module=?MODULE, data=Mem}, Off, Value)
     patomic_xchg_nif(Mem, Off, Value).
 
 patomic_xchg_nif(_,_,_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Perform an atomic compare and swap (CAS) operation on a 64-bit integer value
 %% at given `Position' using specified argument `Value'.  The function returns a
@@ -377,7 +377,7 @@ patomic_cas(#file_descriptor{module=?MODULE, data=Mem}, Off, OldValue, Value)
     patomic_cas_nif(Mem, Off, OldValue, Value).
 
 patomic_cas_nif(_,_,_,_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Perform an atomic store operation of a 64-bit integer `Value' at given `Position'.
 %% This function is thread-safe and can be used for implementing persistent counters.
@@ -387,81 +387,81 @@ patomic_write_integer(#file_descriptor{module=?MODULE, data=Mem}, Off, Value)
     patomic_write_int_nif(Mem, Off, Value).
 
 patomic_write_int_nif(_,_,_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Perform an atomic load operation on a 64-bit integer value at given `Position'.
 %% This function is thread-safe and can be used for implementing persistent counters.
 -spec patomic_read_integer(File::mmap_file(), Position::non_neg_integer()) -> Value::integer().
 patomic_read_integer(#file_descriptor{module=?MODULE, data=Mem}, Off) when is_integer(Off) ->
-    patomic_read_int_nif(Mem, Off).
+  patomic_read_int_nif(Mem, Off).
 
 patomic_read_int_nif(_,_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Open a persistent memory-mapped file with space for one 64-bit integer counter
 open_counters(Filename) ->
-    open_counters(Filename, 1).
+  open_counters(Filename, 1).
 
 %% @doc Open a persistent memory-mapped file with space for several 64-bit integer counters
 open_counters(Filename, NumCounters) ->
-    Size     = 8 + 8 + NumCounters * 8,
-    FileSize = filelib:file_size(Filename),
-    MMAP     = 
-        case open(Filename, 0, Size, [create, read, write, shared, direct, nolock]) of
-            {ok, F, #{exist := false}} when NumCounters > 0 ->
-                ok = pwrite(F, 0, <<"EMMAP01\n", NumCounters:64/integer-little>>),
-                {F, NumCounters};
-            {ok, F, #{exist := true}} ->
-                case pread(F, 0, 16) of
-                    {ok, <<"EMMAP", _,_,$\n, N:64/integer-little>>} when N == NumCounters; NumCounters == 0 ->
-                        {F, N};
-                    {ok, _Other} when FileSize == Size ->
-                        % io:format("Initializing mmap: ~p\n", [_Other]),
-                        ok = pwrite(F, 0, <<"EMMAP01\n", NumCounters:64/integer-little>>),
-                        lists:foldl(fun(I, _) ->
-                            ok = pwrite(F, 16+I*8, <<0:64/integer-little>>),
-                            []
-                        end, [], lists:seq(0, NumCounters-1)),
-                        {F, NumCounters};
-                    {ok, Header} ->
-                        erlang:error({invalid_file_header, Filename, Header});
-                    {error, Why} ->
-                        erlang:error({cannot_read_data, Filename, Why})
-                end;
-            {error, Reason} ->
-                erlang:error({cannot_open_file, Filename, Reason})
-        end,
-    MMAP.
+  Size     = 8 + 8 + NumCounters * 8,
+  FileSize = filelib:file_size(Filename),
+  MMAP     = 
+    case open(Filename, 0, Size, [create, read, write, shared, direct, nolock]) of
+      {ok, F, #{exist := false}} when NumCounters > 0 ->
+        ok = pwrite(F, 0, <<"EMMAP01\n", NumCounters:64/integer-little>>),
+        {F, NumCounters};
+      {ok, F, #{exist := true}} ->
+        case pread(F, 0, 16) of
+          {ok, <<"EMMAP", _,_,$\n, N:64/integer-little>>} when N == NumCounters; NumCounters == 0 ->
+            {F, N};
+          {ok, _Other} when FileSize == Size ->
+            % io:format("Initializing mmap: ~p\n", [_Other]),
+            ok = pwrite(F, 0, <<"EMMAP01\n", NumCounters:64/integer-little>>),
+            lists:foldl(fun(I, _) ->
+              ok = pwrite(F, 16+I*8, <<0:64/integer-little>>),
+              []
+            end, [], lists:seq(0, NumCounters-1)),
+            {F, NumCounters};
+          {ok, Header} ->
+            erlang:error({invalid_file_header, Filename, Header});
+          {error, Why} ->
+            erlang:error({cannot_read_data, Filename, Why})
+        end;
+      {error, Reason} ->
+        erlang:error({cannot_open_file, Filename, Reason})
+    end,
+  MMAP.
 
 %% @doc Close persistent memory-mapped file previously open with `open_counters/2'
 close_counters({MFile, _NumCnts}) ->
-    close(MFile).
+  close(MFile).
 
 %% @doc Increment a counter number `CounterNum' in the mmap file by one and return old value.
 inc_counter({MFile, NumCnts}, CounterNum) ->
-    inc_counter({MFile, NumCnts}, CounterNum, 1).
+  inc_counter({MFile, NumCnts}, CounterNum, 1).
 
 %% @doc Decrement a counter number `CounterNum' in the mmap file by one and return old value.
 dec_counter({MFile, NumCnts}, CounterNum) ->
-    dec_counter({MFile, NumCnts}, CounterNum, 1).
+  dec_counter({MFile, NumCnts}, CounterNum, 1).
 
 %% @doc Increment a counter number `CounterNum' in the mmap file by `Count' and return old value.
 inc_counter({MFile, NumCnts}, CounterNum, Count)
-        when NumCnts > CounterNum, CounterNum >= 0, is_integer(CounterNum), is_integer(Count) ->
+  when NumCnts > CounterNum, CounterNum >= 0, is_integer(CounterNum), is_integer(Count) ->
     patomic_add(MFile, 16+CounterNum*8, Count).
 
 %% @doc Decrement a counter number `CounterNum' in the mmap file by `Count' and return old value.
 dec_counter({MFile, NumCnts}, CounterNum, Count)
-        when NumCnts > CounterNum, CounterNum >= 0, is_integer(CounterNum), is_integer(Count) ->
+  when NumCnts > CounterNum, CounterNum >= 0, is_integer(CounterNum), is_integer(Count) ->
     patomic_sub(MFile, 16+CounterNum*8, Count).
 
 %% @doc Set a counter number `CounterNum' in the mmap file and return the old value.
 set_counter({MFile, NumCnts}, CounterNum, Value)
-        when NumCnts > CounterNum, CounterNum >= 0, is_integer(CounterNum), is_integer(Value) ->
+  when NumCnts > CounterNum, CounterNum >= 0, is_integer(CounterNum), is_integer(Value) ->
     patomic_xchg(MFile, 16+CounterNum*8, Value).
 
 read_counter({MFile, NumCnts}, CounterNum)
-        when NumCnts > CounterNum, CounterNum >= 0, is_integer(CounterNum) ->
+  when NumCnts > CounterNum, CounterNum >= 0, is_integer(CounterNum) ->
     patomic_read_integer(MFile, 16+CounterNum*8).
   
 nvl(undefined, V) -> V;
@@ -470,189 +470,189 @@ nvl(V,         _) -> V.
 %% @doc Initialize fixed-size block storage in the shared memory.
 -spec init_block_storage(File::mmap_file(), BlockSize::pos_integer()) -> ok | {error, atom()|string()}.
 init_block_storage(#file_descriptor{module=?MODULE, data=Mem}, BlockSize) when is_integer(BlockSize) ->
-    init_bs_nif(Mem, BlockSize).
+  init_bs_nif(Mem, BlockSize).
 
 init_bs_nif(_,_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Store data block
 -spec store_block(File::mmap_file(), Data::binary()) -> Addr::non_neg_integer() | {error, atom()|string()}.
 store_block(#file_descriptor{module=?MODULE, data=Mem}, Data) when is_binary(Data) ->
-    store_blk_nif(Mem, Data).
+  store_blk_nif(Mem, Data).
 
 store_blk_nif(_,_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Read data block
 -spec read_block(File::mmap_file(), Addr::non_neg_integer()) -> Data::binary() | eof | {error, atom()|string()}.
 read_block(#file_descriptor{module=?MODULE, data=Mem}, Addr) when is_integer(Addr), Addr >= 0 ->
-    read_blk_nif(Mem, Addr).
+  read_blk_nif(Mem, Addr).
 
 read_blk_nif(_,_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Read data blocks
 -spec read_blocks(File::mmap_file()) -> [Data::binary()] | eof | {error, atom()|string()}.
 read_blocks(#file_descriptor{module=?MODULE, data=Mem}) ->
-    read_blocks_nif(Mem).
+  read_blocks_nif(Mem).
 
 read_blocks_nif(_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Read data blocks
 -spec read_blocks(File::mmap_file(), Start::non_neg_integer(), Count::pos_integer()) ->
-    {[Data::binary()], Continuation::integer() | eof} | {error, atom()|string()}.
+        {[Data::binary()], Continuation::integer() | eof} | {error, atom()|string()}.
 read_blocks(#file_descriptor{module=?MODULE, data=Mem}, Start, Count) ->
-    read_blocks_nif(Mem, Start, Count).
+  read_blocks_nif(Mem, Start, Count).
 
 read_blocks_nif(_, _, _) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Free data block
 -spec free_block(File::mmap_file(), Addr::non_neg_integer()) -> Success :: boolean() | {error, atom()|string()}.
 free_block(#file_descriptor{module=?MODULE, data=Mem}, Addr) when is_integer(Addr), Addr >= 0 ->
-    free_blk_nif(Mem, Addr).
+  free_blk_nif(Mem, Addr).
 
 free_blk_nif(_,_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Repair data block storage after unexpected close
 -spec repair_block_storage(File::mmap_file()) -> ok | {error, atom()|string()}.
 repair_block_storage(#file_descriptor{module=?MODULE, data=Mem}) ->
-    repair_bs_nif(Mem).
+  repair_bs_nif(Mem).
 
 repair_bs_nif(_) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 %% @doc Repair data block storage chunk of max Count elements starting with Start address
 -spec repair_block_storage(File::mmap_file(), Start::non_neg_integer(), Count::pos_integer()) ->
-  Continuation::integer() | eof | {error, atom()|string()}.
+Continuation::integer() | eof | {error, atom()|string()}.
 repair_block_storage(#file_descriptor{module=?MODULE, data=Mem}, Start, Count) ->
-    repair_bs_nif(Mem, Start, Count).
+  repair_bs_nif(Mem, Start, Count).
 
 repair_bs_nif(_, _, _) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+  erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 -ifdef(EUNIT).
 
 simple_test() ->
-    {ok, File} = file:open("test.data", [raw, write]),
-    ok = file:write(File, <<"abcd0123">>),
-    ok = file:close(File),
+  {ok, File} = file:open("test.data", [raw, write]),
+  ok = file:write(File, <<"abcd0123">>),
+  ok = file:close(File),
 
-    %% with direct+shared, the contents of a binary may change
-    {ok, MFile, #{size := 8}} = emmap:open("test.data", 0, 8, [direct, shared, nolock]),
-    {ok, Mem}       = file:pread(MFile, 2, 2),
-    <<"cd">>        = Mem,
-    {error, eacces} = file:pwrite(MFile, 2, <<"xx">>),
+  %% with direct+shared, the contents of a binary may change
+  {ok, MFile, #{size := 8}} = emmap:open("test.data", 0, 8, [direct, shared, nolock]),
+  {ok, Mem}       = file:pread(MFile, 2, 2),
+  <<"cd">>        = Mem,
+  {error, eacces} = file:pwrite(MFile, 2, <<"xx">>),
 
-    {ok, MFile2, #{size := 8}} = emmap:open("test.data", 0, 8, [read, write, shared]),
-    ok                 = file:pwrite(MFile2, 2, <<"xx">>),
-    {ok,     <<"xx">>} = file:pread(MFile, 2, 2),
+  {ok, MFile2, #{size := 8}} = emmap:open("test.data", 0, 8, [read, write, shared]),
+  ok              = file:pwrite(MFile2, 2, <<"xx">>),
+  {ok,  <<"xx">>} = file:pread(MFile, 2, 2),
 
-    %% Woot!
-    <<"xx">> = Mem,
+  %% Woot!
+  <<"xx">> = Mem,
 
-    {ok, 0} = file:position(MFile, {cur, 0}),
-    {ok, <<"ab">>} = file:read(MFile, 2),
-    {ok, <<"xx">>} = file:read(MFile, 2),
+  {ok, 0} = file:position(MFile, {cur, 0}),
+  {ok, <<"ab">>} = file:read(MFile, 2),
+  {ok, <<"xx">>} = file:read(MFile, 2),
 
-    ok = file:pwrite(MFile2, 0, <<0:64>>),
-    {ok, <<0:64>>} = file:pread(MFile, 0, 8),
+  ok = file:pwrite(MFile2, 0, <<0:64>>),
+  {ok, <<0:64>>} = file:pread(MFile, 0, 8),
 
-    {ok,  0}    = emmap:patomic_add(MFile2,  0,10),
-    {ok, 10}    = emmap:patomic_add(MFile2,  0,10),
-    {ok, 20}    = emmap:patomic_sub(MFile2,  0, 5),
-    {ok, 15}    = emmap:patomic_sub(MFile2,  0,12),
-    {ok,  3}    = emmap:patomic_and(MFile2,  0, 7),
-    {ok,  3}    = emmap:patomic_or(MFile2,   0, 7),
-    {ok,  7}    = emmap:patomic_xor(MFile2,  0, 9),
-    {ok, 14}    = emmap:patomic_xchg(MFile2, 0,10),
-    {ok, 10}    = emmap:patomic_xchg(MFile2, 0, 0),
-    {true,   0} = emmap:patomic_cas(MFile2,  0, 0,  20),
-    {false, 20} = emmap:patomic_cas(MFile2,  0, 10, 20),
-    {true,  20} = emmap:patomic_cas(MFile2,  0, 20,  0),
+  {ok,  0}    = emmap:patomic_add(MFile2,  0,10),
+  {ok, 10}    = emmap:patomic_add(MFile2,  0,10),
+  {ok, 20}    = emmap:patomic_sub(MFile2,  0, 5),
+  {ok, 15}    = emmap:patomic_sub(MFile2,  0,12),
+  {ok,  3}    = emmap:patomic_and(MFile2,  0, 7),
+  {ok,  3}    = emmap:patomic_or(MFile2,   0, 7),
+  {ok,  7}    = emmap:patomic_xor(MFile2,  0, 9),
+  {ok, 14}    = emmap:patomic_xchg(MFile2, 0,10),
+  {ok, 10}    = emmap:patomic_xchg(MFile2, 0, 0),
+  {true,   0} = emmap:patomic_cas(MFile2,  0, 0,  20),
+  {false, 20} = emmap:patomic_cas(MFile2,  0, 10, 20),
+  {true,  20} = emmap:patomic_cas(MFile2,  0, 20,  0),
 
-    file:close(MFile),
-    file:close(MFile2),
-    
-    {ok, MFile3, #{exist := true, size := 8}} = emmap:open("test.data", 0, 8,
-        [direct, read, write, shared, nolock, {address, 16#512800000000}]),
-    {ok, <<0:64>>} = file:pread(MFile3, 0, 8),
-    file:close(MFile3),
+  file:close(MFile),
+  file:close(MFile2),
+  
+  {ok, MFile3, #{exist := true, size := 8}} = emmap:open("test.data", 0, 8,
+      [direct, read, write, shared, nolock, {address, 16#512800000000}]),
+  {ok, <<0:64>>} = file:pread(MFile3, 0, 8),
+  file:close(MFile3),
 
-    file:delete("test.data").
+  file:delete("test.data").
 
 counter_test() ->
-    F  = open_counters("/tmp/temp.bin", 1),
-    {ok,N1} = inc_counter(F, 0, 1),
-    {ok,N2} = inc_counter(F, 0, 1),
-    {ok,N3} = set_counter(F, 0, 5),
-    {ok,N4} = set_counter(F, 0, 8),
-    {ok,N5} = read_counter(F, 0),
-    {ok,N6} = dec_counter(F, 0),
-    {ok,N7} = dec_counter(F, 0, 3),
-    {ok,N8} = read_counter(F, 0),
-    close_counters(F),
-    file:delete("/tmp/temp.bin"),
-    ?assertEqual(0, N1),
-    ?assertEqual(1, N2),
-    ?assertEqual(2, N3),
-    ?assertEqual(5, N4),
-    ?assertEqual(8, N5),
-    ?assertEqual(8, N6),
-    ?assertEqual(7, N7),
-    ?assertEqual(4, N8).
+  F  = open_counters("/tmp/temp.bin", 1),
+  {ok,N1} = inc_counter(F, 0, 1),
+  {ok,N2} = inc_counter(F, 0, 1),
+  {ok,N3} = set_counter(F, 0, 5),
+  {ok,N4} = set_counter(F, 0, 8),
+  {ok,N5} = read_counter(F, 0),
+  {ok,N6} = dec_counter(F, 0),
+  {ok,N7} = dec_counter(F, 0, 3),
+  {ok,N8} = read_counter(F, 0),
+  close_counters(F),
+  file:delete("/tmp/temp.bin"),
+  ?assertEqual(0, N1),
+  ?assertEqual(1, N2),
+  ?assertEqual(2, N3),
+  ?assertEqual(5, N4),
+  ?assertEqual(8, N5),
+  ?assertEqual(8, N6),
+  ?assertEqual(7, N7),
+  ?assertEqual(4, N8).
 
 shared_test() ->
-    F = fun(Owner) ->
-          {ok, MM, #{size := 8}} = emmap:open("test.data", 0, 8, [create, direct, read, write, shared, nolock]),
-          Two = receive {start, PP} -> PP end,
-          ok = emmap:pwrite(MM, 0, <<"test1">>),
-          Two ! {self(), <<"test1">>},
-          receive {cont, Two} -> ok end,
-          ok = emmap:pwrite(MM, 0, <<"test2">>),
-          Two ! {self(), <<"test2">>},
-          receive {cont, Two} -> ok end,
-          Two   ! {done, 1},
-          Owner ! {done, MM}
-        end,
-    G = fun(One, Owner) ->
-          {ok, MM, #{size := 8}} = emmap:open("test.data", 0, 8, [create, direct, read, write, shared, nolock]),
-          One ! {start, self()},
-          Bin =
-            receive
-              {One, Bin1 = <<"test1">>} ->
-                {ok, B} = emmap:pread(MM, 0, byte_size(Bin1)),
-                B;
-              Other1 ->
-                erlang:error({error, {one, Other1}})
-            end,
-          % At this point value of Bin is this:
-          Bin = <<"test1">>,
-          One ! {cont, self()},
-          receive
-            {One, Bin2 = <<"test2">>} when Bin2 == Bin ->
-              % Note that previously bound binary changed under the hood
-              % because it's bound to the memory updated by another process
-              Bin = <<"test2">>;
-            Other2 ->
-              erlang:error({error, {two, Other2}})
-          end,
-          One ! {cont, self()},
-          receive
-            {done, 1} -> ok
-          end,
-          Owner ! {done, MM}
-        end,
-    Self = self(),
-    P1 = spawn_link(fun() -> F(Self)     end),
-    _  = spawn_link(fun() -> G(P1, Self) end),
+  F = fun(Owner) ->
+    {ok, MM, #{size := 8}} = emmap:open("test.data", 0, 8, [create, direct, read, write, shared, nolock]),
+    Two = receive {start, PP} -> PP end,
+    ok = emmap:pwrite(MM, 0, <<"test1">>),
+    Two ! {self(), <<"test1">>},
+    receive {cont, Two} -> ok end,
+    ok = emmap:pwrite(MM, 0, <<"test2">>),
+    Two ! {self(), <<"test2">>},
+    receive {cont, Two} -> ok end,
+    Two   ! {done, 1},
+    Owner ! {done, MM}
+  end,
+  G = fun(One, Owner) ->
+    {ok, MM, #{size := 8}} = emmap:open("test.data", 0, 8, [create, direct, read, write, shared, nolock]),
+    One ! {start, self()},
+    Bin =
+      receive
+        {One, Bin1 = <<"test1">>} ->
+          {ok, B} = emmap:pread(MM, 0, byte_size(Bin1)),
+          B;
+        Other1 ->
+          erlang:error({error, {one, Other1}})
+      end,
+    % At this point value of Bin is this:
+    Bin = <<"test1">>,
+    One ! {cont, self()},
+    receive
+      {One, Bin2 = <<"test2">>} when Bin2 == Bin ->
+        % Note that previously bound binary changed under the hood
+        % because it's bound to the memory updated by another process
+        Bin = <<"test2">>;
+      Other2 ->
+        erlang:error({error, {two, Other2}})
+    end,
+    One ! {cont, self()},
+    receive
+      {done, 1} -> ok
+    end,
+    Owner ! {done, MM}
+  end,
+  Self = self(),
+  P1 = spawn_link(fun() -> F(Self)     end),
+  _  = spawn_link(fun() -> G(P1, Self) end),
 
-    receive {done, MM1} -> emmap:close(MM1) end,
-    receive {done, MM2} -> emmap:close(MM2) end,
+  receive {done, MM1} -> emmap:close(MM1) end,
+  receive {done, MM2} -> emmap:close(MM2) end,
 
-    file:delete("test.data").
-    
+  file:delete("test.data").
+  
 
 -endif.
