@@ -200,7 +200,7 @@ metadata(Mem) ->
 header(Mem) ->
   case emmap:pread(Mem, 0, 16) of
     {ok, <<Size:32/integer, H:32/integer, T:32/integer, NextT:32/integer>>}
-        when H >= ?HEADER_SZ, T >= ?HEADER_SZ, H =< T, T =< Size, NextT >= T, NextT =< Size ->
+        when ?HEADER_SZ =< H, H =< T, T =< NextT, NextT =< Size ->
       {H, T, NextT, Size};
     {ok, Hdr} ->
       erlang:error({invalid_queue_header, Hdr});
@@ -246,7 +246,7 @@ push(Mem, Term) ->
 %% @doc Push a term to the queue. This function has a constant-time complexity.
 %% `Compression' is the compression level from `0' to `9', where `0' is no compression.
 push(Mem, Term, Compression) when is_integer(Compression), Compression >= 0, Compression < 10 ->
-  Bin = term_to_binary(Term, [{compressed, 0}, {minor_version, 2}]),
+  Bin = term_to_binary(Term, [{compressed, Compression}, {minor_version, 2}]),
   Sz0 = byte_size(Bin)+8,
   Pad = Sz0 rem 8,
   Sz  = Sz0 + Pad,

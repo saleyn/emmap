@@ -12,6 +12,13 @@
 -export([inc_counter/2, inc_counter/3, dec_counter/2, dec_counter/3]).
 -export([set_counter/3, read_counter/2]).
 
+-export([
+    init_block_storage/2,
+    repair_block_storage/1, repair_block_storage/3,
+    store_block/2, read_block/2, free_block/2,
+    read_blocks/1, read_blocks/3
+]).
+
 -export_type([resource/0, mmap_file/0, open_option/0, open_extra_info/0]).
 
 -on_load(init/0).
@@ -459,6 +466,72 @@ read_counter({MFile, NumCnts}, CounterNum)
   
 nvl(undefined, V) -> V;
 nvl(V,         _) -> V.
+
+%% @doc Initialize fixed-size block storage in the shared memory.
+-spec init_block_storage(File::mmap_file(), BlockSize::pos_integer()) -> ok | {error, atom()|string()}.
+init_block_storage(#file_descriptor{module=?MODULE, data=Mem}, BlockSize) when is_integer(BlockSize) ->
+    init_bs_nif(Mem, BlockSize).
+
+init_bs_nif(_,_) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+
+%% @doc Store data block
+-spec store_block(File::mmap_file(), Data::binary()) -> Addr::non_neg_integer() | {error, atom()|string()}.
+store_block(#file_descriptor{module=?MODULE, data=Mem}, Data) when is_binary(Data) ->
+    store_blk_nif(Mem, Data).
+
+store_blk_nif(_,_) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+
+%% @doc Read data block
+-spec read_block(File::mmap_file(), Addr::non_neg_integer()) -> Data::binary() | eof | {error, atom()|string()}.
+read_block(#file_descriptor{module=?MODULE, data=Mem}, Addr) when is_integer(Addr), Addr >= 0 ->
+    read_blk_nif(Mem, Addr).
+
+read_blk_nif(_,_) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+
+%% @doc Read data blocks
+-spec read_blocks(File::mmap_file()) -> [Data::binary()] | eof | {error, atom()|string()}.
+read_blocks(#file_descriptor{module=?MODULE, data=Mem}) ->
+    read_blocks_nif(Mem).
+
+read_blocks_nif(_) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+
+%% @doc Read data blocks
+-spec read_blocks(File::mmap_file(), Start::non_neg_integer(), Count::pos_integer()) ->
+    {[Data::binary()], Continuation::integer() | eof} | {error, atom()|string()}.
+read_blocks(#file_descriptor{module=?MODULE, data=Mem}, Start, Count) ->
+    read_blocks_nif(Mem, Start, Count).
+
+read_blocks_nif(_, _, _) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+
+%% @doc Free data block
+-spec free_block(File::mmap_file(), Addr::non_neg_integer()) -> Success :: boolean() | {error, atom()|string()}.
+free_block(#file_descriptor{module=?MODULE, data=Mem}, Addr) when is_integer(Addr), Addr >= 0 ->
+    free_blk_nif(Mem, Addr).
+
+free_blk_nif(_,_) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+
+%% @doc Repair data block storage after unexpected close
+-spec repair_block_storage(File::mmap_file()) -> ok | {error, atom()|string()}.
+repair_block_storage(#file_descriptor{module=?MODULE, data=Mem}) ->
+    repair_bs_nif(Mem).
+
+repair_bs_nif(_) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+
+%% @doc Repair data block storage chunk of max Count elements starting with Start address
+-spec repair_block_storage(File::mmap_file(), Start::non_neg_integer(), Count::pos_integer()) ->
+  Continuation::integer() | eof | {error, atom()|string()}.
+repair_block_storage(#file_descriptor{module=?MODULE, data=Mem}, Start, Count) ->
+    repair_bs_nif(Mem, Start, Count).
+
+repair_bs_nif(_, _, _) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 -ifdef(EUNIT).
 

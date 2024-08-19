@@ -12,6 +12,8 @@
 #include <list>
 #include <erl_nif.h>
 
+#include "bsna.hpp"
+
 static ErlNifResourceType* MMAP_RESOURCE;
 
 #ifndef MAP_NOCACHE
@@ -39,10 +41,11 @@ static void debug(bool dbg, const char* fmt, Args&&... args)
 
 struct mhandle
 {
-  mhandle(void* mem,   const char* file, size_t size, bool direct,
+  mhandle(void* mem, const char* file, int fd, size_t size, bool direct,
           bool fixed_size,  size_t max_inc_size,
           bool auto_unlink, int    prot, bool   lock, bool dbg)
     : position(0)
+    , fd(fd)
     , direct(direct)
     , prot(prot)
     , dbg(dbg)
@@ -107,6 +110,7 @@ struct mhandle
   using MemList = std::list<MemSlot>;
 
   size_t          position;
+  int             fd;
   bool            direct;
   int             prot;
   bool            dbg;
@@ -140,6 +144,22 @@ void emmap_dtor(ErlNifEnv* env, void* arg)
 #define R_UNLOCK  if (handle->rwlock != 0) enif_rwlock_runlock(handle->rwlock)
 #define R_LOCK    if (handle->rwlock != 0) enif_rwlock_rlock(handle->rwlock)
 
+struct rw_lock {
+  rw_lock(mhandle* h) : lock(h->rwlock) { if (lock != 0) enif_rwlock_rwlock(lock); }
+  rw_lock(const rw_lock&) = delete;
+  rw_lock& operator=(const rw_lock&) = delete;
+  ~rw_lock() { if (lock != 0) enif_rwlock_rwunlock(lock); }
+  ErlNifRWLock* lock;
+};
+
+struct r_lock {
+  r_lock(mhandle* h) : lock(h->rwlock) { if (lock != 0) enif_rwlock_rlock(lock); }
+  r_lock(const r_lock&) = delete;
+  r_lock& operator=(const r_lock&) = delete;
+  ~r_lock() { if (lock != 0) enif_rwlock_runlock(lock); }
+  ErlNifRWLock* lock;
+};
+
 static ERL_NIF_TERM ATOM_ADDRESS;
 static ERL_NIF_TERM ATOM_ALIGNMENT;
 static ERL_NIF_TERM ATOM_ANON;
@@ -161,6 +181,7 @@ static ERL_NIF_TERM ATOM_FALSE;
 static ERL_NIF_TERM ATOM_FILE;
 static ERL_NIF_TERM ATOM_FIXED;
 static ERL_NIF_TERM ATOM_FIXED_SIZE;
+static ERL_NIF_TERM ATOM_FULL;
 static ERL_NIF_TERM ATOM_HUGETLB;
 static ERL_NIF_TERM ATOM_HUGE_2MB;
 static ERL_NIF_TERM ATOM_HUGE_1GB;
@@ -207,6 +228,14 @@ static ERL_NIF_TERM emmap_patomic_cas      (ErlNifEnv*, int argc, const ERL_NIF_
 static ERL_NIF_TERM emmap_patomic_read_int (ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM emmap_patomic_write_int(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 
+// fixed-size blocks storage operations
+static ERL_NIF_TERM emmap_init_bs(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_read_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_store_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_free_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_read_blocks(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_repair_bs(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+
 extern "C" {
 
   static ErlNifFunc nif_funcs[] =
@@ -229,6 +258,14 @@ extern "C" {
     {"position_nif",          3, emmap_position},
     {"read_nif",              2, emmap_read},
     {"read_line_nif",         1, emmap_read_line},
+    {"init_bs_nif",           2, emmap_init_bs},
+    {"read_blk_nif",          2, emmap_read_blk},
+    {"store_blk_nif",         2, emmap_store_blk},
+    {"free_blk_nif",          2, emmap_free_blk},
+    {"read_blocks_nif",       1, emmap_read_blocks},
+    {"read_blocks_nif",       3, emmap_read_blocks},
+    {"repair_bs_nif",         1, emmap_repair_bs},
+    {"repair_bs_nif",         3, emmap_repair_bs},
   };
 
 };
@@ -261,6 +298,7 @@ static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
   ATOM_FILE             = enif_make_atom(env, "file");
   ATOM_FIXED            = enif_make_atom(env, "fixed");
   ATOM_FIXED_SIZE       = enif_make_atom(env, "fixed_size");
+  ATOM_FULL             = enif_make_atom(env, "full");
   ATOM_HUGETLB          = enif_make_atom(env, "hugetlb");
   ATOM_HUGE_2MB         = enif_make_atom(env, "huge_2mb");
   ATOM_HUGE_1GB         = enif_make_atom(env, "huge_1gb");
@@ -467,6 +505,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
 
   int fd = -1;
 
+  bool reuse = (open_flags & O_CREAT) == 0;
   bool exists = false;
 
   if ((flags & MAP_ANON) == 0) {
@@ -475,7 +514,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
     if (!exists) {
       if (len == 0)
         return make_error_tuple(env, "Missing {size, N} option");
-      if ((open_flags & O_CREAT) == 0)
+      if (reuse)
         return make_error_tuple(env, "Missing 'create' option");
     }
 
@@ -497,7 +536,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
       fsize = st.st_size;
     }
 
-    if (exists && len > 0 && fsize != long(len) && fsize > 0) {
+    if (exists && reuse && len > 0 && fsize != long(len) && fsize > 0) {
       char buf[1280];
       snprintf(buf, sizeof(buf), "File %s has different size (%ld) than requested (%ld)",
                path, long(fsize), len);
@@ -537,9 +576,6 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
   if   (res == MAP_FAILED)
     return make_error_tuple(env, errno);
 
-  if (fd >= 0)
-    close(fd);
-
   auto handle = (mhandle*)enif_alloc_resource(MMAP_RESOURCE, sizeof(mhandle));
 
   if (!handle) {
@@ -550,7 +586,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
     return make_error_tuple(env, buf);
   }
 
-  new (handle) mhandle(res, path, size, direct, fixed_size, max_inc_size, auto_unlink, prot, lock, dbg);
+  new (handle) mhandle(res, path, fd, size, direct, fixed_size, max_inc_size, auto_unlink, prot, lock, dbg);
   ERL_NIF_TERM resource = enif_make_resource(env, handle);
   enif_release_resource(handle);
 
@@ -639,6 +675,44 @@ static ERL_NIF_TERM emmap_pread(ErlNifEnv* env, int argc, const ERL_NIF_TERM arg
   return enif_make_tuple2(env, ATOM_OK, res);
 }
 
+#ifndef __APPLE__
+static bool resize_file(mhandle* handle, size_t new_size) {
+  if (handle->fd >= 0) {
+    if (ftruncate(handle->fd, new_size) < 0) {
+      debug(handle->dbg, "ftruncate: %s\r\n", strerror_compat(errno));
+      return false;
+    }
+    debug(handle->dbg, "File %s resized to %d bytes\r\n", handle->path, new_size);
+  }
+  return true;
+}
+
+static int resize(mhandle* handle, unsigned long& new_size) {
+  if (new_size == 0)
+    new_size = handle->len < handle->max_inc_size
+             ? handle->len * 2 : handle->len + handle->max_inc_size;
+
+  if (new_size > handle->len && !resize_file(handle, new_size))
+    return -1;
+
+  void* addr = mremap(handle->mem, handle->len, new_size, MREMAP_MAYMOVE);
+  if (addr == (void*)-1)
+    return -1;
+
+  if (new_size < handle->len && !resize_file(handle, new_size))
+    return -1;
+
+  handle->mem = addr;
+  handle->len = new_size;
+  return 0;
+}
+
+static int resize(mhandle* handle) {
+  unsigned long new_size = 0;
+  return resize(handle, new_size);
+}
+#endif
+
 static ERL_NIF_TERM emmap_resize(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
   unsigned long new_size;
@@ -664,19 +738,11 @@ static ERL_NIF_TERM emmap_resize(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
     return make_error(env, ATOM_CLOSED);
   }
 
-  if (new_size == 0)
-    new_size = handle->len < handle->max_inc_size
-             ? handle->len * 2 : handle->len + handle->max_inc_size;
-
-  void* addr = mremap(handle->mem, handle->len, new_size, MREMAP_MAYMOVE);
-  if (addr == (void*)-1) {
+  if (resize(handle, new_size) < 0) {
     const char* err = strerror_compat(errno);
     RW_UNLOCK;
     return make_error_tuple(env, err);
   }
-
-  handle->mem = addr;
-  handle->len = new_size;
   RW_UNLOCK;
 
   return enif_make_tuple2(env, ATOM_OK, enif_make_ulong(env, new_size));
@@ -1117,4 +1183,284 @@ static ERL_NIF_TERM emmap_position(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
   RW_UNLOCK;
 
   return enif_make_tuple2(env, ATOM_OK, enif_make_ulong(env, position));
+}
+
+#ifdef __APPLE__
+#define RESIZE(env, handle) return make_error(env, ATOM_FIXED_SIZE)
+#else
+#define RESIZE(env, handle) do { \
+  if (handle->fixed_size) \
+    return make_error(env, ATOM_FIXED_SIZE); \
+  if (resize(handle) < 0) { \
+    const char* err = strerror_compat(errno); \
+    return make_error_tuple(env, err); \
+  } \
+  debug(handle, "Resized memory map to %lu bytes\r\n", handle->len); \
+  debug(handle, "New memory range %p ... %p\r\n", handle->mem, (char *)handle->mem + handle->len); \
+} while (false)
+#endif
+
+// init fixed-size blocks storage
+static ERL_NIF_TERM emmap_init_bs(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  size_t block_size;
+  mhandle* handle;
+  if (argc!=2
+      || !enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
+      || !enif_get_ulong(env, argv[1], &block_size)
+      )
+    return enif_make_badarg(env);
+
+  if ((handle->prot & PROT_WRITE) == 0)
+    return make_error(env, ATOM_EACCES);
+
+  rw_lock lock(handle);
+
+  if (handle->closed())
+    return make_error(env, ATOM_CLOSED);
+
+  while (sizeof(bs_head) > handle->len) RESIZE(env, handle);
+
+  bs_head& hdr = *(bs_head*)handle->mem;
+  hdr.init(block_size);
+
+  return ATOM_OK;
+}
+
+template<typename T>
+static inline bool read_block(mhandle *handle, int addr, T consumer) {
+  bs_head& hdr = *(bs_head*)handle->mem;
+  char *mem = (char *)handle->mem;
+  void *start = mem + sizeof(bs_head);
+  void *stop = mem + handle->len;
+  return hdr.read(start, stop, addr, consumer);
+}
+
+static ERL_NIF_TERM emmap_read_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  unsigned long addr;
+  mhandle* handle;
+  if (argc!=2
+      || !enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
+      || !enif_get_ulong(env, argv[1], &addr)
+      || sizeof(bs_head) > handle->len
+     )
+    return enif_make_badarg(env);
+
+  if ((handle->prot & PROT_READ) == 0)
+    return make_error(env, ATOM_EACCES);
+
+  r_lock lock(handle);
+
+  if (handle->closed())
+    return make_error(env, ATOM_CLOSED);
+
+  ERL_NIF_TERM res = ATOM_EOF;
+
+  // if this mmap is direct, use a resource binary
+  if (handle->direct)
+    read_block(handle, addr, [env, handle, &res] (void *ptr, size_t len) {
+      res = enif_make_resource_binary(env, handle, ptr, len);
+    });
+  else
+    // When it is non-direct, we have to allocate the binary
+    read_block(handle, addr, [env, &res] (void *ptr, size_t len) {
+      ErlNifBinary bin;
+      if (enif_alloc_binary(len, &bin)) {
+        memcpy(bin.data, ptr, len);
+        res = enif_make_binary(env, &bin);
+      } else
+        res = make_error(env, ATOM_ENOMEM);
+    });
+
+  return res;
+}
+
+static inline int store_block(mhandle *handle, ErlNifBinary& bin) {
+  bs_head& hdr = *(bs_head*)handle->mem;
+  char *mem = (char *)handle->mem;
+  void *start = mem + sizeof(bs_head);
+  void *stop = mem + handle->len;
+  return hdr.store(start, stop, bin);
+}
+
+static ERL_NIF_TERM emmap_store_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  mhandle* handle;
+  ErlNifBinary bin;
+  if (argc!=2
+      || !enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
+      || !enif_inspect_binary(env, argv[1], &bin)
+      || sizeof(bs_head) > handle->len
+      )
+    return enif_make_badarg(env);
+
+  if ((handle->prot & PROT_WRITE) == 0)
+    return make_error(env, ATOM_EACCES);
+
+  rw_lock lock(handle);
+
+  if (handle->closed())
+    return make_error(env, ATOM_CLOSED);
+
+  if (bin.size != ((bs_head*)handle->mem)->block_size)
+    return enif_make_badarg(env);
+
+  int addr;
+  while ((addr = store_block(handle, bin)) < 0) {
+    if (addr < -1)
+      RESIZE(env, handle);
+    else
+      return make_error(env, ATOM_FULL);
+  }
+
+  return enif_make_ulong(env, addr);
+}
+
+static ERL_NIF_TERM emmap_free_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  unsigned long addr;
+  mhandle* handle;
+  if (argc!=2
+      || !enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
+      || !enif_get_ulong(env, argv[1], &addr)
+      || sizeof(bs_head) > handle->len
+     )
+    return enif_make_badarg(env);
+
+  if ((handle->prot & PROT_WRITE) == 0)
+    return make_error(env, ATOM_EACCES);
+
+  rw_lock lock(handle);
+
+  if (handle->closed())
+    return make_error(env, ATOM_CLOSED);
+
+  bs_head& hdr = *(bs_head*)handle->mem;
+  char *mem = (char *)handle->mem;
+  void *start = mem + sizeof(bs_head);
+  void *stop = mem + handle->len;
+  return hdr.free(start, stop, addr) ? ATOM_TRUE : ATOM_FALSE;
+}
+
+static ERL_NIF_TERM emmap_read_blocks(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  mhandle* handle;
+  if (argc < 1
+      || !enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
+      || sizeof(bs_head) > handle->len
+     )
+    return enif_make_badarg(env);
+
+  unsigned long addr = 0, max = 0;
+
+  if (argc > 1) {
+    if (argc < 3) return enif_make_badarg(env);
+    if (!enif_get_ulong(env, argv[1], &addr)) return enif_make_badarg(env);
+    if (!enif_get_ulong(env, argv[2], &max)) return enif_make_badarg(env);
+    if (max == 0) return enif_make_badarg(env);
+  }
+
+  if ((handle->prot & PROT_READ) == 0)
+    return make_error(env, ATOM_EACCES);
+
+  r_lock lock(handle);
+
+  if (handle->closed())
+    return make_error(env, ATOM_CLOSED);
+
+  bs_head& hdr = *(bs_head*)handle->mem;
+  char *mem = (char *)handle->mem;
+  void *start = mem + sizeof(bs_head);
+  void *stop = mem + handle->len;
+
+  ERL_NIF_TERM res = enif_make_list(env, 0);
+
+  int ret;
+  if (max > 0) {
+    // if this mmap is direct, use a resource binary
+    if (handle->direct)
+      ret = hdr.fold(start, stop, addr, [env, handle, &max, &res] (int addr, void *ptr, size_t len) -> bool {
+        res = enif_make_list_cell(env,
+          enif_make_tuple2(env, enif_make_int(env, addr), enif_make_resource_binary(env, handle, ptr, len)), res);
+        return --max > 0;
+      });
+    else
+      // when it is non-direct, we have to allocate the binary
+      ret = hdr.fold(start, stop, addr, [env, &max, &res] (int addr, void *ptr, size_t len) -> bool {
+        ErlNifBinary bin;
+        if (enif_alloc_binary(len, &bin)) {
+          memcpy(bin.data, ptr, len);
+          res = enif_make_list_cell(env,
+            enif_make_tuple2(env, enif_make_int(env, addr), enif_make_binary(env, &bin)), res);
+        } else
+          res = make_error(env, ATOM_ENOMEM);
+        return --max > 0;
+      });
+    return ret > 0 ?
+      enif_make_tuple2(env, res, enif_make_int(env, ret)) :
+      enif_make_tuple2(env, res, ATOM_EOF);
+  }
+  else {
+    // if this mmap is direct, use a resource binary
+    if (handle->direct)
+      hdr.fold(start, stop, [env, handle, &res] (int addr, void *ptr, size_t len) {
+        res = enif_make_list_cell(env,
+          enif_make_tuple2(env, enif_make_int(env, addr), enif_make_resource_binary(env, handle, ptr, len)), res);
+      });
+    else
+      // when it is non-direct, we have to allocate the binary
+      hdr.fold(start, stop, [env, &res] (int addr, void *ptr, size_t len) {
+        ErlNifBinary bin;
+        if (enif_alloc_binary(len, &bin)) {
+          memcpy(bin.data, ptr, len);
+          res = enif_make_list_cell(env,
+            enif_make_tuple2(env, enif_make_int(env, addr), enif_make_binary(env, &bin)), res);
+        } else
+          res = make_error(env, ATOM_ENOMEM);
+      });
+  }
+
+  return res;
+}
+
+static ERL_NIF_TERM emmap_repair_bs(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  mhandle* handle;
+  if (argc < 1
+      || !enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
+      || sizeof(bs_head) > handle->len
+     )
+    return enif_make_badarg(env);
+
+  unsigned long addr = 0, max = 0;
+
+  if (argc > 1) {
+    if (argc < 3) return enif_make_badarg(env);
+    if (!enif_get_ulong(env, argv[1], &addr)) return enif_make_badarg(env);
+    if (!enif_get_ulong(env, argv[2], &max)) return enif_make_badarg(env);
+    if (max == 0) return enif_make_badarg(env);
+  }
+
+  if ((handle->prot & PROT_WRITE) == 0)
+    return make_error(env, ATOM_EACCES);
+
+  rw_lock lock(handle);
+
+  if (handle->closed())
+    return make_error(env, ATOM_CLOSED);
+
+  bs_head& hdr = *(bs_head*)handle->mem;
+  char *mem = (char *)handle->mem;
+  void *start = mem + sizeof(bs_head);
+  void *stop = mem + handle->len;
+
+  if (max > 0) {
+    auto ret = hdr.repair(start, stop, addr, max);
+    return ret > 0 ? enif_make_int(env, ret) : ATOM_EOF;
+  }
+  else {
+    hdr.repair(start, stop);
+    return ATOM_OK;
+  }
 }

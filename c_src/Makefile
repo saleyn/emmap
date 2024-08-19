@@ -10,7 +10,7 @@ ERL_INTERFACE_LIB_DIR ?= $(shell erl -noshell -eval "io:format(\"~ts\", [code:li
 SOURCES := $(wildcard *.cpp)
 OBJECTS := $(addsuffix .o,  $(basename $(SOURCES)))
 TARGETS := $(addprefix $(BASEDIR)/priv/, $(addsuffix .so, $(basename $(SOURCES))))
-HEADERS := $(wildcard *.h)
+HEADERS := $(wildcard *.h*)
 
 ifneq ($(OUTDIR),$(BASEDIR))
 ifneq ($(OUTDIR),)
@@ -25,6 +25,11 @@ ifneq ($(or $(findstring $(NIF_DEBUG),1 true),$(findstring test,$(REBAR_ENV))),)
 else
   ADDFLAGS := -O3 -DNDEBUG
 	V        := 0
+endif
+
+# If BS_LEVELS is defined, add a macro definition for it
+ifeq ($(origin BS_LEVELS), environment)
+  ADDFLAGS += -DBS_LEVELS=$(BS_LEVELS)
 endif
 
 UNAME_SYS  := $(shell uname -s)
