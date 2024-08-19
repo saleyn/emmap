@@ -234,6 +234,7 @@ static ERL_NIF_TERM emmap_read_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv
 static ERL_NIF_TERM emmap_store_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM emmap_free_blk(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM emmap_read_blocks(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM emmap_repair_bs(ErlNifEnv*, int argc, const ERL_NIF_TERM argv[]);
 
 extern "C" {
 
@@ -263,6 +264,8 @@ extern "C" {
     {"free_blk_nif",          2, emmap_free_blk},
     {"read_blocks_nif",       1, emmap_read_blocks},
     {"read_blocks_nif",       3, emmap_read_blocks},
+    {"repair_bs_nif",         1, emmap_repair_bs},
+    {"repair_bs_nif",         3, emmap_repair_bs},
   };
 
 };
@@ -1328,7 +1331,7 @@ static ERL_NIF_TERM emmap_free_blk(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
   if ((handle->prot & PROT_WRITE) == 0)
     return make_error(env, ATOM_EACCES);
 
-  r_lock lock(handle);
+  rw_lock lock(handle);
 
   if (handle->closed())
     return make_error(env, ATOM_CLOSED);
@@ -1419,4 +1422,45 @@ static ERL_NIF_TERM emmap_read_blocks(ErlNifEnv* env, int argc, const ERL_NIF_TE
   }
 
   return res;
+}
+
+static ERL_NIF_TERM emmap_repair_bs(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  mhandle* handle;
+  if (argc < 1
+      || !enif_get_resource(env, argv[0], MMAP_RESOURCE, (void**)&handle)
+      || sizeof(bs_head) > handle->len
+     )
+    return enif_make_badarg(env);
+
+  unsigned long addr = 0, max = 0;
+
+  if (argc > 1) {
+    if (argc < 3) return enif_make_badarg(env);
+    if (!enif_get_ulong(env, argv[1], &addr)) return enif_make_badarg(env);
+    if (!enif_get_ulong(env, argv[2], &max)) return enif_make_badarg(env);
+    if (max == 0) return enif_make_badarg(env);
+  }
+
+  if ((handle->prot & PROT_WRITE) == 0)
+    return make_error(env, ATOM_EACCES);
+
+  rw_lock lock(handle);
+
+  if (handle->closed())
+    return make_error(env, ATOM_CLOSED);
+
+  bs_head& hdr = *(bs_head*)handle->mem;
+  char *mem = (char *)handle->mem;
+  void *start = mem + sizeof(bs_head);
+  void *stop = mem + handle->len;
+
+  if (max > 0) {
+    auto ret = hdr.repair(start, stop, addr, max);
+    return ret > 0 ? enif_make_int(env, ret) : ATOM_EOF;
+  }
+  else {
+    hdr.repair(start, stop);
+    return ATOM_OK;
+  }
 }

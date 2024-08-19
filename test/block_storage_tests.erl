@@ -49,16 +49,53 @@ basic_test() ->
 
 sustainability_test() ->
     FName = "/tmp/garbage.bin",
-    lists:foreach(fun (Size) ->
-        ok = file:write_file(FName, rand:bytes(Size)),
-        {ok, MFile, #{size := Size}} = emmap:open(FName, []),
-        L = try
-            emmap:read_blocks(MFile)
+    Size = 64 * 64 * 64 * 32,
+    BS = 22, Limo = Size,
+
+    lists:foreach(fun (_) ->
+        Data = <<BS:32/little, Limo:32/little, (rand:bytes(Size - 8))/bytes>>,
+        ok = file:write_file(FName, Data),
+        {ok, MFile, #{size := Size}} = emmap:open(FName, [write]),
+        try
+            % read a whole storage
+            L1 = emmap:read_blocks(MFile),
+            ?assert(is_list(L1)),
+
+            % read in chunks
+            L2 = read_chunks(MFile, 1_000),
+            ?assert(is_list(L2)),
+
+            % results must be equal
+            ?assertEqual(L1, L2),
+
+            % repair storage in chunks
+            ok = repair_chunks(MFile, 10_000),
+
+            % save binary result and list of items
+            {ok, Bin1} = emmap:pread(MFile, 0, Size),
+            L3 = read_chunks(MFile, 1_000),
+            ?assert(is_list(L3)),
+
+            % restore raw data
+            ok = emmap:pwrite(MFile, 0, Data),
+
+            % repair whole storage
+            ok = emmap:repair_block_storage(MFile),
+
+            % save binary result and list of items
+            {ok, Bin2} = emmap:pread(MFile, 0, Size),
+            L4 = read_chunks(MFile, 1_000),
+            ?assert(is_list(L4)),
+
+            ?assertMatch(Bin1, Bin2),
+            ?assertEqual(L3, L4),
+
+            ?debugFmt("~p ~p", [length(L1), length(L3)]),
+            ?assert(length(L1) =< length(L3))
         catch error:badarg ->
-            []
-        end,
-        ?assert(is_list(L))
-    end, lists:seq(1, 1000)).
+            ok
+        end
+    end, lists:seq(1, 20)).
 
 big_random_test() ->
     FileName = "/tmp/bigrandom.bin",
@@ -113,9 +150,21 @@ read_chunks(MFile, N) ->
 read_chunks(_MFile, eof, _, Acc) ->
     lists:concat(Acc);
 read_chunks(MFile, Start, N, Acc) ->
-    {L, Cont} = emmap:read_blocks(MFile, Start, N),
+    {_Time, {L, Cont}} = timer:tc(emmap, read_blocks, [MFile, Start, N]),
     ?assert(is_list(L)),
+    % ?debugFmt("~p-chunk read in ~p us~n", [N, Time]),
     read_chunks(MFile, Cont, N, [L | Acc]).
+
+repair_chunks(MFile, N) ->
+    repair_chunks(MFile, 0, N).
+
+repair_chunks(_MFile, eof, _) ->
+    ok;
+repair_chunks(MFile, Start, N) ->
+    Cont = emmap:repair_block_storage(MFile, Start, N),
+    {_Time, Cont} = timer:tc(emmap, repair_block_storage, [MFile, Start, N]),
+    % ?debugFmt("chunk checked in ~p us~n", [Time]),
+    repair_chunks(MFile, Cont, N).
 
 block_storage_test() ->
     {ok, MFile, #{size := 8}} = emmap:open("/tmp/storage.bin", 0, 8, [create, write, shared]),

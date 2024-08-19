@@ -13,9 +13,10 @@
 -export([set_counter/3, read_counter/2]).
 
 -export([
-    init_block_storage/2, store_block/2,
-    read_block/2, read_blocks/1, read_blocks/3,
-    free_block/2
+    init_block_storage/2,
+    repair_block_storage/1, repair_block_storage/3,
+    store_block/2, read_block/2, free_block/2,
+    read_blocks/1, read_blocks/3
 ]).
 
 -export_type([resource/0, mmap_file/0, open_option/0, open_extra_info/0]).
@@ -513,6 +514,23 @@ free_block(#file_descriptor{module=?MODULE, data=Mem}, Addr) when is_integer(Add
     free_blk_nif(Mem, Addr).
 
 free_blk_nif(_,_) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+
+%% @doc Repair data block storage after unexpected close
+-spec repair_block_storage(File::mmap_file()) -> ok | {error, atom()|string()}.
+repair_block_storage(#file_descriptor{module=?MODULE, data=Mem}) ->
+    repair_bs_nif(Mem).
+
+repair_bs_nif(_) ->
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
+
+%% @doc Repair data block storage chunk of max Count elements starting with Start address
+-spec repair_block_storage(File::mmap_file(), Start::non_neg_integer(), Count::pos_integer()) ->
+  Continuation::integer() | eof | {error, atom()|string()}.
+repair_block_storage(#file_descriptor{module=?MODULE, data=Mem}, Start, Count) ->
+    repair_bs_nif(Mem, Start, Count).
+
+repair_bs_nif(_, _, _) ->
     erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]}).
 
 -ifdef(EUNIT).
