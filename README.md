@@ -241,7 +241,7 @@ handler and block size (it will be saved in the storage header).
 ```
 
 When opening an existing file, it may be possible that it was left in an inconsistent state in case of abnormal
-termination of the program modifying it. To ensure consistency, call `emmap:repair_block_storage/1` to check and fix the file at once, or repeatedly call `emmap:repair_block_storage/3`. The latter version with continuation is recommended to relatively big storages, to avoid long-running NIF calls. The repair operation checks (and fixes) inconsistency between "free blocks" and "used blocks" masks in the internal tree-like representation.
+termination of the program modifying it. To ensure consistency, call `emmap:repair_block_storage/1` to check and fix the file at once, or repeatedly call `emmap:repair_block_storage/3`. The latter version with continuation is recommended for relatively big storages, to avoid long-running NIF calls. The repair operation checks (and fixes) inconsistency between "free blocks" and "used blocks" masks in the internal tree-like representation.
 
 ```erlang
 repair_chunks(MFile, N) ->
@@ -252,4 +252,21 @@ repair_chunks(_MFile, eof, _) ->
 repair_chunks(MFile, Start, N) ->
   Cont = emmap:repair_block_storage(MFile, Start, N),
   repair_chunks(MFile, Cont, N).
+```
+
+To read all blocks, use `emmap:read_blocks/1`, or `emmap:read_blocks/3` for reads with continuation, limiting the number of blocks read in one shot, to avoid long-running NIF calls.
+
+```erlang
+  List = emmap:read_blocks(MFile),
+```
+or
+```erlang
+read_chunks(MFile, N) ->
+  read_chunks(MFile, 0, N, []).
+
+read_chunks(_MFile, eof, _, Acc) ->
+  lists:concat(Acc);
+read_chunks(MFile, Start, N, Acc) ->
+  {L, Cont} = emmap:read_blocks(MFile, Start, N),
+  read_chunks(MFile, Cont, N, [L | Acc]).
 ```
