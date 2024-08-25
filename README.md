@@ -41,7 +41,8 @@ interchangeably:
 
 - `{ok, Binary} = file:pread(Mem, Position, Length)` read Length bytes at Position in the file.
 - `ok = file:pwrite(Mem, Position, Binary)` writes to the given position. 
-- `{ok, Binary} = file:read(Mem, Length)` read 1..Length bytes from current position, or return `eof` if pointer is at end of file.
+- `{ok, Binary} = file:read(Mem, Length)` read 1..Length bytes from current position, or return
+  `eof` if pointer is at end of file.
 - `{ok, Pos} = file:position(Mem, Where)` see file:position/2 documentation.
 - `ok = file:close(Mem)`
 
@@ -240,8 +241,12 @@ handler and block size (it will be saved in the storage header).
   ok = emmap:init_block_storage(MFile, 22),
 ```
 
-When opening an existing file, it may be possible that it was left in an inconsistent state in case of abnormal
-termination of the program modifying it. To ensure consistency, call `emmap:repair_block_storage/1` to check and fix the file at once, or repeatedly call `emmap:repair_block_storage/3`. The latter version with continuation is recommended for relatively big storages, to avoid long-running NIF calls. The repair operation checks (and fixes) inconsistency between "free blocks" and "used blocks" masks in the internal tree-like representation.
+When opening an existing file, it may be possible that it was left in an inconsistent state in
+case of abnormal termination of the program modifying it. To ensure consistency, call
+`emmap:repair_block_storage/1` to check and fix the file at once, or repeatedly call
+`emmap:repair_block_storage/3`. The latter version with continuation is recommended for relatively
+big storages, to avoid long-running NIF calls. The repair operation checks (and fixes)
+inconsistency between "free blocks" and "used blocks" masks in the internal tree-like representation.
 
 ```erlang
 repair_chunks(MFile, N) ->
@@ -254,7 +259,8 @@ repair_chunks(MFile, Start, N) ->
   repair_chunks(MFile, Cont, N).
 ```
 
-To read all blocks, use `emmap:read_blocks/1`, or `emmap:read_blocks/3` for reads with continuation, limiting the number of blocks read in one shot, to avoid long-running NIF calls.
+To read all blocks, use `emmap:read_blocks/1`, or `emmap:read_blocks/3` for reads with continuation,
+limiting the number of blocks read in one shot, to avoid long-running NIF calls.
 
 ```erlang
   List = emmap:read_blocks(MFile),
@@ -271,7 +277,9 @@ read_chunks(MFile, Start, N, Acc) ->
   read_chunks(MFile, Cont, N, [L | Acc]).
 ```
 
-The function `emmap:read_block/2` reads the block at the given address, `emmap:store_block/2` writes the data block into the storage, and `emmap:free_block/2` deletes the block at the given address.
+The function `emmap:read_block/2` reads the block at the given address, `emmap:store_block/2`
+writes the data block into the storage, and `emmap:free_block/2` deletes the block at the given
+address.
 
 ```erlang
   Addr = emmap:store_block(MFile, Data),
@@ -285,6 +293,7 @@ The default `BS_LEVELS` value is 3, so the default capacity is `64 * 64 * 64 = 2
 
 An attempt to store a block will return `{error, full}` when the storage has no free slots.
 
-The result of freeing a block is `true` on success, `false` if there is no block with the given address found, or `{error, Reason}` for common emmap error cases.
+The result of freeing a block is `true` on success, `false` if there is no block with the given address
+found, or `{error, Reason}` for common emmap error cases.
 
 The `read_block/2` returns bytes, `eof` when no block exists at the given address or common error.
