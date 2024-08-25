@@ -12,6 +12,7 @@ Erlang virtual machine.  It offers three sets of functions to implement:
    atomic operations (e.g. `xchg`, `cas`, `and`, `or`, and `xor`) for the counters, as well as
    adding counter persistence.
 3. Persistent FIFO queue.
+4. Persistent storage for fixed-size data blocks.
 
 ## Authors
 
@@ -176,7 +177,7 @@ eshell#2> emmap:pread(F, 0, 8).
 $ head -1 /tmp/q.bin        # returns no data because changes in shell1 are invisible
 ```
 
-## Persistent FIFO used as a container or guarded by a gen_server process.
+## Persistent FIFO used as a container or guarded by a gen_server process
 
 The `emmap_queue` module implements a persistent FIFO queue based on a memory-mapped file.
 This means that in-memory operations of enqueuing items are automatically persisted on disk.
@@ -219,4 +220,36 @@ a     = emmap_queue:dequeue(Pid),
 {b,1} = emmap_queue:dequeue(Pid),
 {c,d} = emmap_queue:dequeue(Pid),
 nil   = emmap_queue:dequeue(Pid).
+```
+
+## Persistent storage for fixed-size data blocks
+
+The purpose is to store, read, and remove arbitrary data blocks of a fixed size. Each block of
+data stored has a unique integer address (internally translated into an offset from the beginning
+of the memory-mapped file). Persistent storage tries to reuse a free block closest to the file start
+or allocate a new block when needed. The file may be automatically resized (expanded) when required.
+
+To start using a memory-mapped file as a storage call `emmap:init_block_storage/2` providing emmap
+handler and block size (it will be saved in the storage header).
+
+```erlang
+  % open underlying memory-mapped file
+  {ok, MFile, Info} = emmap:open("storage.bin", 0, 4096, [create, write, shared]),
+
+  % init block storage of the fixed block size
+  ok = emmap:init_block_storage(MFile, 22),
+```
+
+When opening an existing file, it may be possible that it was left in an inconsistent state in case of abnormal
+termination of the program modifying it. To ensure consistency, call `emmap:repair_block_storage/1` to check and fix the file at once, or repeatedly call `emmap:repair_block_storage/3`. The latter version with continuation is recommended to relatively big storages, to avoid long-running NIF calls. The repair operation checks (and fixes) inconsistency between "free blocks" and "used blocks" masks in the internal tree-like representation.
+
+```erlang
+repair_chunks(MFile, N) ->
+  repair_chunks(MFile, 0, N).
+
+repair_chunks(_MFile, eof, _) ->
+  ok;
+repair_chunks(MFile, Start, N) ->
+  Cont = emmap:repair_block_storage(MFile, Start, N),
+  repair_chunks(MFile, Cont, N).
 ```
