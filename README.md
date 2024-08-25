@@ -270,3 +270,21 @@ read_chunks(MFile, Start, N, Acc) ->
   {L, Cont} = emmap:read_blocks(MFile, Start, N),
   read_chunks(MFile, Cont, N, [L | Acc]).
 ```
+
+The function `emmap:read_block/2` reads the block at the given address, `emmap:store_block/2` writes the data block into the storage, and `emmap:free_block/2` deletes the block at the given address.
+
+```erlang
+  Addr = emmap:store_block(MFile, Data),
+  Bytes = emmap:read_block(MFile, Addr),
+  emmap:free_block(MFile, Addr),
+```
+
+The storage capacity is limited by internal organization. It depends on the number of tree levels, and can be
+configured by defining the environment variable `BS_LEVELS`. The maximum number of stored blocks is `64 ^ BS_LEVELS`.
+The default `BS_LEVELS` value is 3, so the default capacity is `64 * 64 * 64 = 262144` blocks.
+
+An attempt to store a block will return `{error, full}` when the storage has no free slots.
+
+The result of freeing a block is `true` on success, `false` if there is no block with the given address found, or `{error, Reason}` for common emmap error cases.
+
+The `read_block/2` returns bytes, `eof` when no block exists at the given address or common error.
