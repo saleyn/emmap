@@ -1,4 +1,4 @@
-@version eebb9bb
+@version 2.1.0
 @doc
 
 == Erlang MMAP `emmap` ==
