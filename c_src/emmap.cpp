@@ -181,7 +181,7 @@ static ERL_NIF_TERM ATOM_FALSE;
 static ERL_NIF_TERM ATOM_FILE;
 static ERL_NIF_TERM ATOM_FIXED;
 static ERL_NIF_TERM ATOM_FIXED_SIZE;
-static ERL_NIF_TERM ATOM_RESIZE;
+static ERL_NIF_TERM ATOM_FIT;
 static ERL_NIF_TERM ATOM_FULL;
 static ERL_NIF_TERM ATOM_HUGETLB;
 static ERL_NIF_TERM ATOM_HUGE_2MB;
@@ -297,9 +297,9 @@ static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
   ATOM_EXIST            = enif_make_atom(env, "exist");
   ATOM_FALSE            = enif_make_atom(env, "false");
   ATOM_FILE             = enif_make_atom(env, "file");
+  ATOM_FIT              = enif_make_atom(env, "fit");
   ATOM_FIXED            = enif_make_atom(env, "fixed");
   ATOM_FIXED_SIZE       = enif_make_atom(env, "fixed_size");
-  ATOM_RESIZE           = enif_make_atom(env, "resize");
   ATOM_FULL             = enif_make_atom(env, "full");
   ATOM_HUGETLB          = enif_make_atom(env, "hugetlb");
   ATOM_HUGE_2MB         = enif_make_atom(env, "huge_2mb");
@@ -351,7 +351,7 @@ static ERL_NIF_TERM make_error(ErlNifEnv* env, ERL_NIF_TERM err_atom) {
 static bool decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flags, 
                          long* open_flags,  long* mode, bool* direct, bool* lock,
                          bool* auto_unlink, size_t* address, bool* debug,
-                         size_t* max_inc_size, bool* fixed_size, bool* resize)
+                         size_t* max_inc_size, bool* fixed_size, bool* fit)
 {
   bool   l = true;
   bool   d = false;
@@ -368,7 +368,7 @@ static bool decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flag
   *debug        = false;
   *max_inc_size = 64*1024*1024;
   *fixed_size   = false;
-  *resize       = false;
+  *fit          = false;
   *prot         = 0;
   *flags        = 0;
 
@@ -430,8 +430,8 @@ static bool decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flag
       f |= MAP_FIXED;
     } else if (enif_is_identical(head, ATOM_FIXED_SIZE)) {
       *fixed_size = true;
-    } else if (enif_is_identical(head, ATOM_RESIZE)) {
-      *resize = true;
+    } else if (enif_is_identical(head, ATOM_FIT)) {
+      *fit = true;
 //  } else if (enif_is_identical(head, ATOM_FILE)) {
 //    f |= MAP_FILE;
     } else if (enif_is_identical(head, ATOM_NOCACHE)) {
@@ -491,9 +491,9 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
   int prot;
   long open_flags;
   long mode;
-  bool lock, direct, auto_unlink, dbg, fixed_size, resize;
-  unsigned long int len;
-  unsigned long int offset;
+  bool lock, direct, auto_unlink, dbg, fixed_size, fit;
+  unsigned long len;
+  unsigned long offset;
   size_t address, max_inc_size;
   char   path[1024];
 
@@ -505,7 +505,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
       || !enif_get_ulong(env, argv[2], &len)
       || !decode_flags(env, argv[3], &prot, &flags, &open_flags, &mode,
                        &direct, &lock, &auto_unlink,
-                       &address, &dbg, &max_inc_size, &fixed_size, &resize))
+                       &address, &dbg, &max_inc_size, &fixed_size, &fit))
     return enif_make_badarg(env);
 
   int fd = -1;
@@ -541,7 +541,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
       fsize = st.st_size;
     }
 
-    if (!resize && exists && len > 0 && fsize != long(len) && fsize > 0) {
+    if (!fit && exists && len > 0 && fsize != long(len) && fsize > 0) {
       char buf[1280];
       snprintf(buf, sizeof(buf), "File %s has different size (%ld) than requested (%ld)",
                path, long(fsize), len);
@@ -549,12 +549,26 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
       return make_error_tuple(env, buf);
     }
 
-    // Stretch the file size to the requested size
-    if ((!exists && ((open_flags & (O_CREAT|O_TRUNC)) > 0)) ||
-         (exists && (fsize == 0 || (resize && fsize != long(len))))) {
-      bool is_ok = ftruncate(fd, 0)   == 0 &&
-                   ftruncate(fd, len) == 0;
-      if (is_ok)
+    bool resized = false, resize_ok = true;
+    if (exists) {
+      // Stretch the file size to the requested size
+      if (fsize == 0 || (fit && fsize < long(len))) {
+        resized = true;
+        resize_ok = ftruncate(fd, len) == 0;
+      }
+      // Set mapped region length to the greater file size
+      if (fit && fsize > long(len)) len = fsize;
+    }
+    else {
+      // Truncate, then stretch file
+      if ((open_flags & (O_CREAT|O_TRUNC)) > 0) {
+        resized = true;
+        resize_ok = ftruncate(fd, 0) == 0 && ftruncate(fd, len) == 0;
+      }
+    }
+
+    if (resized) {
+      if (resize_ok)
         debug(dbg, "File %s resized to %d bytes\r\n", path, len);
       else {
         debug(dbg, "ftruncate: %s\r\n", strerror_compat(errno));

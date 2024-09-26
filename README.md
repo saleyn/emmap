@@ -233,9 +233,14 @@ or allocate a new block when needed. The file may be automatically resized (expa
 To start using a memory-mapped file as a storage call `emmap:init_block_storage/2` providing emmap
 handler and block size (it will be saved in the storage header).
 
+The new flag `fit` added to emmap:open/4 option list. When set and the existing file opened has a size
+less than requested region length, the file will be stretched to the given length. If the file size is
+greater than requested, with fit flag the mapped region will fit the file size. Without the `fit` flag
+attempt to map existing file of a different size will result in error.
+
 ```erlang
   % open underlying memory-mapped file
-  {ok, MFile, Info} = emmap:open("storage.bin", 0, 4096, [create, write, shared]),
+  {ok, MFile, Info} = emmap:open("storage.bin", 0, 4096, [create, write, fit, shared]),
 
   % init block storage of the fixed block size
   ok = emmap:init_block_storage(MFile, 22),
