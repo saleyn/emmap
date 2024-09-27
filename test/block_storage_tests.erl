@@ -4,7 +4,8 @@
 
 basic_test() ->
   % open underlying memory-mapped file
-  {ok, MFile, #{size := 1}} = emmap:open("/tmp/simple.bin", 0, 1, [create, write, shared]),
+  {ok, MFile, #{size := X}} = emmap:open("/tmp/simple.bin", 0, 1, [create, fit, write, shared]),
+  ?assert(X >= 1),
 
   % init block storage of the fixed block size
   ok = emmap:init_block_storage(MFile, 1),
@@ -103,7 +104,8 @@ big_random_test() ->
   Iterations = 100_000,
   MaxSize = 200,
 
-  {ok, MFile, #{size := 1}} = emmap:open(FileName, 0, 1, [create, write, shared]),
+  {ok, MFile, #{size := N}} = emmap:open(FileName, 0, 1, [create, fit, write, shared]),
+  ?assert(N >= 1),
   ok = emmap:init_block_storage(MFile, BlockSize),
 
   Acc = loop(Iterations, MFile, #{}, fun
@@ -167,7 +169,8 @@ repair_chunks(MFile, Start, N) ->
   repair_chunks(MFile, Cont, N).
 
 block_storage_test() ->
-  {ok, MFile, #{size := 8}} = emmap:open("/tmp/storage.bin", 0, 8, [create, write, shared]),
+  {ok, MFile, #{size := N}} = emmap:open("/tmp/storage.bin", 0, 8, [create, fit, write, shared]),
+  ?assert(N >= 8),
   ok = emmap:init_block_storage(MFile, 8),
   write_n_blocks(4096, MFile, 8),
 
