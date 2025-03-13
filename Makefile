@@ -30,3 +30,5 @@ build-aux/docs-addon.mk:
 
 publish: docs clean
 	$(REBAR) hex $(if $(replace),publish --replace,cut)
+
+.PHONY: test
