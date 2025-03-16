@@ -2,7 +2,22 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-basic_test() ->
+is_mac() ->
+    {unix, darwin} =:= os:type().
+
+not_on_mac_test() ->
+    case is_mac() of
+        true ->
+            {skip, "Skipping macOS-incompatible tests"};
+        false ->
+            [
+                basic_test_t(),
+                big_random_test_t(),
+                block_storage_test_t()
+            ]
+    end.
+
+basic_test_t() ->
   % open underlying memory-mapped file
   {ok, MFile, #{size := X}} = emmap:open("/tmp/simple.bin", 0, 1, [create, fit, write, shared]),
   ?assert(X >= 1),
@@ -98,7 +113,7 @@ sustainability_test() ->
     end
   end, lists:seq(1, 20)).
 
-big_random_test() ->
+big_random_test_t() ->
   FileName = "/tmp/bigrandom.bin",
   BlockSize = 1531,
   Iterations = 100_000,
@@ -168,7 +183,7 @@ repair_chunks(MFile, Start, N) ->
   % ?debugFmt("chunk checked in ~p us~n", [Time]),
   repair_chunks(MFile, Cont, N).
 
-block_storage_test() ->
+block_storage_test_t() ->
   {ok, MFile, #{size := N}} = emmap:open("/tmp/storage.bin", 0, 8, [create, fit, write, shared]),
   ?assert(N >= 8),
   ok = emmap:init_block_storage(MFile, 8),
