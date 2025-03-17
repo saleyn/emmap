@@ -2,14 +2,11 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-is_mac() ->
-    {unix, darwin} =:= os:type().
-
 not_on_mac_test() ->
-    case is_mac() of
-        true ->
+    case os:type() of
+        {unix, darwin} ->
             {skip, "Skipping macOS-incompatible tests"};
-        false ->
+        _ ->
             [
                 basic_test_t(),
                 big_random_test_t(),
