@@ -3,16 +3,16 @@
 -include_lib("eunit/include/eunit.hrl").
 
 not_on_mac_test() ->
-    case os:type() of
-        {unix, darwin} ->
-            {skip, "Skipping macOS-incompatible tests"};
-        _ ->
-            [
-                basic_test_t(),
-                big_random_test_t(),
-                block_storage_test_t()
-            ]
-    end.
+  case os:type() of
+    {unix, darwin} ->
+      {skip, "Skipping macOS-incompatible tests"};
+    _ ->
+      [
+        basic_test_t(),
+        big_random_test_t(),
+        block_storage_test_t()
+      ]
+  end.
 
 basic_test_t() ->
   % open underlying memory-mapped file
