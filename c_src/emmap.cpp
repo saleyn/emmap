@@ -565,17 +565,9 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
       return make_error_tuple(env, buf);
     }
 
-    bool resized = false, resize_ok = true;
     // Stretch the file size to the requested size
     if (fsize == 0 || (fit && fsize < long(len))) {
-      resized = true;
-      resize_ok = ftruncate(fd, len) == 0;
-    }
-    // Set mapped region length to the greater file size
-    if (fit && fsize > long(len)) len = fsize;
-
-    if (resized) {
-      if (resize_ok)
+      if (ftruncate(fd, len) == 0)
         debug(dbg, "File %s resized to %d bytes\r\n", path, len);
       else {
         debug(dbg, "ftruncate: %s\r\n", strerror_compat(errno));
@@ -584,6 +576,8 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
         return make_error_tuple(env, err);
       }
     }
+    // Set mapped region length to the greater file size
+    if (fit && fsize > long(len)) len = fsize;
   }
 
   off_t pa_offset = 0;
