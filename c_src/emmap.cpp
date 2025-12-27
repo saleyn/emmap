@@ -566,22 +566,13 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
     }
 
     bool resized = false, resize_ok = true;
-    if (exists) {
-      // Stretch the file size to the requested size
-      if (fsize == 0 || (fit && fsize < long(len))) {
-        resized = true;
-        resize_ok = ftruncate(fd, len) == 0;
-      }
-      // Set mapped region length to the greater file size
-      if (fit && fsize > long(len)) len = fsize;
+    // Stretch the file size to the requested size
+    if (fsize == 0 || (fit && fsize < long(len))) {
+      resized = true;
+      resize_ok = ftruncate(fd, len) == 0;
     }
-    else {
-      // Truncate, then stretch file
-      if ((open_flags & (O_CREAT|O_TRUNC)) > 0) {
-        resized = true;
-        resize_ok = ftruncate(fd, len) == 0;
-      }
-    }
+    // Set mapped region length to the greater file size
+    if (fit && fsize > long(len)) len = fsize;
 
     if (resized) {
       if (resize_ok)
