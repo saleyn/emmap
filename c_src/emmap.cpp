@@ -520,22 +520,28 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
 
   int fd = -1;
 
-  bool reuse = (open_flags & O_CREAT) == 0;
   bool exists = false;
 
   if ((flags & MAP_ANON) == 0) {
-    exists = access(path, F_OK) == 0;
-
-    if (!exists) {
-      if (len == 0)
-        return make_error_tuple(env, "File doesn't exist, zero Len and missing {size, N} option");
-      if (reuse)
-        return make_error_tuple(env, "Missing 'create' option");
+    if ((open_flags & O_CREAT) != 0) {
+      fd = open(path, open_flags | O_EXCL, (mode_t)mode);
+      if (fd < 0) {
+        exists = true;
+        fd = open(path, open_flags, (mode_t)mode);
+      }
+    } else {
+      exists = true;
+      fd = open(path, open_flags, (mode_t)mode);
     }
 
-    fd = open(path, open_flags, (mode_t)mode);
-
     if (fd < 0) {
+      if (errno == ENOENT) {
+        if (len == 0)
+          return make_error_tuple(env, "File doesn't exist, zero Len and missing {size, N} option");
+        if ((open_flags & O_CREAT) != 0)
+          return make_error_tuple(env, "Missing 'create' option");
+      }
+
       debug(dbg, "open: %s\r\n", strerror_compat(errno));
       return make_error_tuple(env, errno);
     }
