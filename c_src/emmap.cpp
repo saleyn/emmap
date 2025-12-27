@@ -579,7 +579,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
       // Truncate, then stretch file
       if ((open_flags & (O_CREAT|O_TRUNC)) > 0) {
         resized = true;
-        resize_ok = ftruncate(fd, 0) == 0 && ftruncate(fd, len) == 0;
+        resize_ok = ftruncate(fd, len) == 0;
       }
     }
 
