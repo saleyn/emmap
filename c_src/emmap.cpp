@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
+#include <limits.h>
 #include <atomic>
 #include <memory>
 #include <cassert>
@@ -13,6 +14,10 @@
 #include <erl_nif.h>
 
 #include "bsna.hpp"
+
+#ifndef PATH_MAX       // Mach
+# define PATH_MAX 4096 // matches every other system
+#endif
 
 static ErlNifResourceType* MMAP_RESOURCE;
 
@@ -121,7 +126,7 @@ struct mhandle
   size_t          max_inc_size;   // Below this threshold, when resizing, the size will double
   bool            fixed_size;     // Don't allow memory to be resized
   bool            auto_unlink;
-  char            path[1024];
+  char            path[PATH_MAX];
 };
 
 template <typename... Args>
@@ -495,7 +500,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
   unsigned long len;
   unsigned long offset;
   size_t address, max_inc_size;
-  char   path[1024];
+  char   path[PATH_MAX];
 
   static_assert(sizeof(long int) == sizeof(size_t), "Architecture not supported");
 
@@ -542,7 +547,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
     }
 
     if (!fit && exists && len > 0 && fsize != long(len) && fsize > 0) {
-      char buf[1280];
+      char buf[PATH_MAX + 256];
       snprintf(buf, sizeof(buf), "File %s has different size (%ld) than requested (%ld)",
                path, long(fsize), len);
       close(fd);
