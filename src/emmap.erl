@@ -72,6 +72,9 @@
 %%    <dd>Allow to create mmap file if it doesn't exist.</dd>
 %%   <dt>debug</dt>
 %%    <dd>Turn on debug printing in the NIF library.</dd>
+%%   <dt>fit</dt>
+%%    <dd>When fit is set, and opening a file with the current file size greater than
+%%        requested, the memory map will be set to the requested length.</dd>
 %%   <dt>direct</dt>
 %%    <dd>Read/pread operations do not copy memory, but rather use "resource binaries" that
 %%        can change content if the underlying data is changed.  This is the most performant,
