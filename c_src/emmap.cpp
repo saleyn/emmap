@@ -592,8 +592,10 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
   }
   auto  size = (size_t)len + offset - pa_offset;
   void* res  = mmap((void*)address, size, prot, flags, fd, (size_t)pa_offset);
-  if   (res == MAP_FAILED)
+  if   (res == MAP_FAILED) {
+    if (fd >= 0) close(fd);
     return make_error_tuple(env, errno);
+  }
 
   auto handle = (mhandle*)enif_alloc_resource(MMAP_RESOURCE, sizeof(mhandle));
 
@@ -602,6 +604,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
     munmap(res, size);
     char buf[256];
     snprintf(buf, sizeof(buf), "Cannot allocate resource: %s\n", strerror_compat(err));
+    if (fd >= 0) close(fd);
     return make_error_tuple(env, buf);
   }
 
@@ -613,8 +616,10 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
   ERL_NIF_TERM vals[] = {exists ? ATOM_TRUE : ATOM_FALSE, enif_make_ulong(env, size)};
 
   ERL_NIF_TERM map;
-  if (!enif_make_map_from_arrays(env, keys, vals, 2, &map))
+  if (!enif_make_map_from_arrays(env, keys, vals, 2, &map)) {
+    if (fd >= 0) close(fd);
     return make_error_tuple(env, ATOM_CANNOT_CREATE_MAP);
+  }
 
   debug(handle, "Created memory map %p of size %lu (%s)\r\n", res, size, path);
 
