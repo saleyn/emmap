@@ -33,34 +33,34 @@ jobs:
     - name: Test
       run:  make test
 
-  macOS:
-    runs-on: ${{ matrix.os }}
-    name: OTP ${{ matrix.otp }} ${{ matrix.os }}.${{ matrix.compiler.compiler }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ macos-latest ]
-        compiler:
-          - { compiler: XCode, CC: cc, CXX: c++ }
+  #macOS:
+  #  runs-on: ${{ matrix.os }}
+  #  name: OTP ${{ matrix.otp }} ${{ matrix.os }}.${{ matrix.compiler.compiler }}
+  #  strategy:
+  #    fail-fast: false
+  #    matrix:
+  #      os: [ macos-latest ]
+  #      compiler:
+  #        - { compiler: XCode, CC: cc, CXX: c++ }
 
-    steps:
-      - uses: actions/checkout@v2
-      - name: Install Base Dependencies
-        run: |
-          brew update > /dev/null || true
-          brew tap Homebrew/bundle
-          brew install erlang@25
-          brew install rebar3
-          #brew bundle --verbose
-      - name: Compile
-        env:
-          CC: ${{ matrix.compiler.CC }}
-          CXX: ${{ matrix.compiler.CXX }}
-          SRC_DIR: ${{ github.workspace }}
-          BUILD_DIR: ${{ github.workspace }}/build
-          INSTALL_PREFIX: ${{ github.workspace }}/install
-        run:  make
-      - name: Dialyzer
-        run:  make check
-      - name: Test
-        run:  make test
+  #  steps:
+  #    - uses: actions/checkout@v2
+  #    - name: Install Base Dependencies
+  #      run: |
+  #        brew update > /dev/null || true
+  #        brew tap Homebrew/bundle
+  #        brew install erlang@25
+  #        brew install rebar3
+  #        #brew bundle --verbose
+  #    - name: Compile
+  #      env:
+  #        CC: ${{ matrix.compiler.CC }}
+  #        CXX: ${{ matrix.compiler.CXX }}
+  #        SRC_DIR: ${{ github.workspace }}
+  #        BUILD_DIR: ${{ github.workspace }}/build
+  #        INSTALL_PREFIX: ${{ github.workspace }}/install
+  #      run:  make
+  #    - name: Dialyzer
+  #      run:  make check
+  #    - name: Test
+  #      run:  make test
