@@ -353,10 +353,10 @@ static ERL_NIF_TERM make_error(ErlNifEnv* env, ERL_NIF_TERM err_atom) {
   return enif_make_tuple2(env, ATOM_ERROR, err_atom);
 }
 
-static bool decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flags, 
+static bool decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flags,
                          long* open_flags,  long* mode, bool* direct, bool* lock,
                          bool* auto_unlink, size_t* address, bool* debug,
-                         size_t* max_inc_size, bool* fixed_size, bool* fit)
+                         size_t* max_inc_size, bool* fixed_size, bool* fit, unsigned long *len)
 {
   bool   l = true;
   bool   d = false;
@@ -463,6 +463,11 @@ static bool decode_flags(ErlNifEnv* env, ERL_NIF_TERM list, int* prot, int* flag
         if (tmp > 0)  // Otherwise use default size
           *max_inc_size = tmp;
         continue;
+      } else if (enif_is_identical (tuple[0], ATOM_SIZE) &&
+                 enif_get_ulong(env,tuple[1], &tmp)) {
+        if (*len == 0)
+          *len = tmp;
+        continue;
       } else
         return false;
     } else {
@@ -510,7 +515,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
       || !enif_get_ulong(env, argv[2], &len)
       || !decode_flags(env, argv[3], &prot, &flags, &open_flags, &mode,
                        &direct, &lock, &auto_unlink,
-                       &address, &dbg, &max_inc_size, &fixed_size, &fit))
+                       &address, &dbg, &max_inc_size, &fixed_size, &fit, &len))
     return enif_make_badarg(env);
 
   int fd = -1;
@@ -523,7 +528,7 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
 
     if (!exists) {
       if (len == 0)
-        return make_error_tuple(env, "Missing {size, N} option");
+        return make_error_tuple(env, "File doesn't exist, zero Len and missing {size, N} option");
       if (reuse)
         return make_error_tuple(env, "Missing 'create' option");
     }
