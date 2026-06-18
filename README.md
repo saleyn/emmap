@@ -1,8 +1,8 @@
-# Erlang MMAP `emmap`
+![Emmap](assets/emmap-banner.png)
 
 [![build](https://github.com/saleyn/emmap/actions/workflows/erlang.yml/badge.svg)](https://github.com/saleyn/emmap/actions/workflows/erlang.yml)
 
-This Erlang library implements an ability to use memory map files in the memory of the
+`emmap` is an erlang library implements an ability to use memory map files in the memory of the
 Erlang virtual machine.  It offers three sets of functions to implement:
 
 1. Generic read/write access to memory mapped files.
