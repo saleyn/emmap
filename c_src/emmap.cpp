@@ -528,6 +528,10 @@ static ERL_NIF_TERM emmap_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
       if (fd < 0) {
         exists = true;
         fd = open(path, open_flags, (mode_t)mode);
+      } else if (len == 0) {
+        close(fd);
+        unlink(path);
+        return make_error_tuple(env, "File doesn't exist, zero Len and missing {size, N} option");
       }
     } else {
       exists = true;
