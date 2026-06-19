@@ -1,4 +1,4 @@
-![Emmap](assets/emmap-banner.png)
+![Emmap](https://github.com/saleyn/emmap/blob/master/assets/emmap-banner.png?raw=true)
 
 [![build](https://github.com/saleyn/emmap/actions/workflows/erlang.yml/badge.svg)](https://github.com/saleyn/emmap/actions/workflows/erlang.yml)
 
