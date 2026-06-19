@@ -172,7 +172,7 @@ close(Mem) ->
   emmap:close(Mem).
 
 %% @doc Asynchronously flush the modified memory used by the queue to disk.
-%% See notes of `emmap:sync/1'.  This call is optional.
+%% See notes of `emmap:flush/1'.  This call is optional.
 -spec flush(queue()) -> ok.
 flush(Mem) ->
   emmap:flush(Mem).
