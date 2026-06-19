@@ -1,10 +1,15 @@
-{application,emmap,
-             [{description,"Erlang Memory-Mapped Files"},
-              {vsn,"2.1.3"},
-              {modules,[emmap]},
-              {registered,[]},
-              {applications,[kernel,stdlib]},
-              {env,[]},
-              {maintainers,["Serge Aleynikov"]},
-              {licenses,["Apache2"]},
-              {links,[{"Github","https://github.com/saleyn/emmap"}]}]}.
+{application,emmap, [
+  {description,"Erlang Memory-Mapped Files"},
+  {vsn,"2.1.3"},
+  {modules,[emmap]},
+  {registered,[]},
+  {applications,[kernel,stdlib]},
+  {env,[]},
+  {maintainers,["Serge Aleynikov"]},
+  {licenses,["Apache-2.0"]},
+  {links,[{"Github","https://github.com/saleyn/emmap"}]},
+  {files,    [
+    "src", "c_src", "Makefile", "rebar.config", "rebar.lock",
+    "README.md", "LICENSE", "assets"
+  ]}
+]}.
